@@ -3,575 +3,1026 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AURA — EVE Intelligence</title>
+    <title>AURA — EVE Intelligence System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        body {
-            background-color: #0a0e1a;
-            color: #c8d8e8;
-            font-family: 'Segoe UI', sans-serif;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+        :root {
+            --bg-root:    #0b0b0d;
+            --bg-panel:   #111115;
+            --bg-raise:   #17171c;
+            --bg-hover:   #1e1e25;
+            --border:     #252529;
+            --border-dim: #1c1c20;
+            --text-main:  #c4c4c8;
+            --text-dim:   #72727a;
+            --text-muted: #3e3e45;
+            --accent:     #8899aa;
+            --accent-dim: #8899aa22;
+            --accent-low: #8899aa0f;
+            --gold:       #c8a96e;
+            --gold-dim:   #c8a96e22;
+            --green:      #5a9e6f;
+            --red:        #9e5a5a;
+            --font-mono:  'JetBrains Mono', monospace;
+            --font-body:  'Inter', system-ui, sans-serif;
         }
 
+        html, body {
+            height: 100%;
+            background: var(--bg-root);
+            color: var(--text-main);
+            font-family: var(--font-body);
+            overflow: hidden;
+        }
+
+        /* ── HEADER ── */
         header {
-            background: linear-gradient(90deg, #0d1b2a, #1a2f4a);
-            border-bottom: 1px solid #1e90ff33;
-            padding: 14px 24px;
+            height: 52px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
-            gap: 16px;
+            padding: 0 24px;
+            gap: 0;
+            flex-shrink: 0;
+            position: relative;
         }
 
-        .aura-logo {
-            font-size: 24px;
+        /* scanline texture on header */
+        header::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0,0,0,0.08) 2px,
+                rgba(0,0,0,0.08) 4px
+            );
+            pointer-events: none;
+        }
+
+        .logo-block {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+
+        .logo {
+            font-family: var(--font-mono);
+            font-size: 18px;
             font-weight: 700;
-            color: #1e90ff;
-            letter-spacing: 4px;
+            color: var(--accent);
+            letter-spacing: 6px;
         }
 
-        .aura-subtitle {
-            font-size: 12px;
-            color: #4a7fa8;
+        .logo-sep {
+            color: var(--border);
+            font-family: var(--font-mono);
+            font-size: 15px;
+        }
+
+        .logo-sub {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-muted);
             letter-spacing: 2px;
             text-transform: uppercase;
         }
 
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            background: #00ff88;
-            border-radius: 50%;
+        .header-right {
             margin-left: auto;
-            box-shadow: 0 0 6px #00ff88;
-            animation: pulse 2s infinite;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .github-link {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-muted);
+            text-decoration: none;
+            letter-spacing: 0.5px;
+            transition: color 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .github-link:hover { color: var(--accent); }
+
+        .github-link::before {
+            content: '⌥';
+            font-size: 14px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: var(--bg-raise);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: pulse 3s infinite;
         }
 
         @keyframes pulse {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
+            50% { opacity: 0.3; }
         }
 
         .status-text {
-            font-size: 11px;
-            color: #00ff88;
-            letter-spacing: 1px;
-        }
-
-        .main-layout {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
-
-        /* ── SIDEBAR ── */
-        .sidebar {
-            width: 240px;
-            background: #0d1b2a;
-            border-right: 1px solid #1e90ff22;
-            display: flex;
-            flex-direction: column;
-            overflow-y: auto;
-            flex-shrink: 0;
-        }
-
-        .sidebar-section {
-            padding: 16px;
-            border-bottom: 1px solid #1e90ff11;
-        }
-
-        .sidebar-label {
-            font-size: 10px;
-            color: #2a4a6a;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            margin-bottom: 10px;
-        }
-
-        .mode-btn {
-            width: 100%;
-            background: transparent;
-            border: 1px solid #1e90ff22;
-            border-radius: 6px;
-            color: #4a7fa8;
-            padding: 10px 12px;
-            font-size: 13px;
-            cursor: pointer;
-            text-align: left;
-            margin-bottom: 6px;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .mode-btn:hover {
-            background: #1a2f4a;
-            border-color: #1e90ff55;
-            color: #c8d8e8;
-        }
-
-        .mode-btn.active {
-            background: #1a2f4a;
-            border-color: #1e90ff;
-            color: #1e90ff;
-        }
-
-        .mode-btn .mode-icon { font-size: 16px; }
-
-        .mode-btn .mode-info { display: flex; flex-direction: column; }
-        .mode-btn .mode-name { font-weight: 600; font-size: 13px; }
-        .mode-btn .mode-status { font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
-
-        .status-online { color: #00ff88; }
-        .status-soon { color: #ffaa00; }
-
-        .quick-section { padding: 16px; }
-
-        .quick-btn {
-            width: 100%;
-            background: transparent;
-            border: 1px solid #1e90ff15;
-            border-radius: 4px;
-            color: #2a4a6a;
-            padding: 8px 10px;
-            font-size: 11px;
-            cursor: pointer;
-            text-align: left;
-            margin-bottom: 4px;
-            transition: all 0.2s;
-            letter-spacing: 0.5px;
-        }
-
-        .quick-btn:hover {
-            border-color: #1e90ff44;
-            color: #4a7fa8;
-        }
-
-        /* ── CHAT AREA ── */
-        .chat-area {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .mode-banner {
-            padding: 10px 20px;
-            background: #0d1b2a;
-            border-bottom: 1px solid #1e90ff22;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            font-family: var(--font-mono);
             font-size: 12px;
-            color: #4a7fa8;
-            letter-spacing: 1px;
+            color: var(--green);
+            letter-spacing: 2px;
         }
 
-        .mode-banner .banner-icon { font-size: 16px; }
-        .mode-banner .banner-name { color: #1e90ff; font-weight: 600; }
-        .mode-banner .banner-desc { color: #2a4a6a; }
+        /* ── BODY LAYOUT ── */
+        .body-layout {
+            display: flex;
+            height: calc(100vh - 52px);
+            overflow: hidden;
+        }
 
+        /* ── CHAT COLUMN ── */
+        .chat-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 1px solid var(--border);
+        }
+
+        /* ── MESSAGES ── */
         #chat-container {
             flex: 1;
             overflow-y: auto;
-            padding: 24px;
+            padding: 28px 28px 16px 28px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 20px;
         }
 
-        #chat-container::-webkit-scrollbar { width: 4px; }
-        #chat-container::-webkit-scrollbar-track { background: #0a0e1a; }
-        #chat-container::-webkit-scrollbar-thumb { background: #1e90ff44; border-radius: 2px; }
+        #chat-container::-webkit-scrollbar { width: 3px; }
+        #chat-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-        .message {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 8px;
-            line-height: 1.6;
+        /* Welcome */
+        .welcome {
+            margin: auto;
+            text-align: center;
+            max-width: 480px;
+            padding: 40px 20px;
+        }
+
+        .welcome-glyph {
+            font-family: var(--font-mono);
             font-size: 14px;
-            white-space: pre-wrap;
+            color: var(--text-muted);
+            letter-spacing: 3px;
+            margin-bottom: 18px;
         }
 
-        .user-message {
-            background: #1a2f4a;
-            border: 1px solid #1e90ff33;
-            align-self: flex-end;
-            color: #c8d8e8;
+        .welcome-title {
+            font-family: var(--font-mono);
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: 8px;
+            margin-bottom: 8px;
         }
 
-        .aura-message {
-            background: #0d1b2a;
-            border: 1px solid #1e90ff22;
-            align-self: flex-start;
-            color: #c8d8e8;
+        .welcome-tagline {
+            font-size: 15px;
+            color: var(--text-dim);
+            line-height: 1.7;
+            margin-bottom: 28px;
+            letter-spacing: 0.3px;
         }
 
-        .message .sender {
-            font-size: 10px;
+        .welcome-hint {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+            padding: 10px 16px;
+            border: 1px solid var(--border-dim);
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        /* Messages */
+        .message {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: 88%;
+        }
+
+        .msg-meta {
+            font-family: var(--font-mono);
+            font-size: 12px;
             letter-spacing: 2px;
-            margin-bottom: 6px;
+            color: var(--text-muted);
+        }
+
+        .user-message { align-self: flex-end; }
+        .aura-message { align-self: flex-start; }
+
+        .user-message .msg-meta { text-align: right; color: var(--text-muted); }
+        .aura-message .msg-meta { color: var(--accent); }
+
+        .msg-bubble {
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 17px;
+            line-height: 1.7;
+        }
+
+        .user-message .msg-bubble {
+            background: var(--bg-raise);
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            white-space: pre-wrap;
+            font-family: var(--font-body);
+        }
+
+        .aura-message .msg-bubble {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-dim);
+            color: var(--text-main);
+            font-family: var(--font-body);
+        }
+
+        /* Markdown in AURA messages */
+        .aura-message .msg-bubble h1,
+        .aura-message .msg-bubble h2,
+        .aura-message .msg-bubble h3 {
+            font-family: var(--font-mono);
+            color: var(--accent);
+            letter-spacing: 1px;
+            margin: 14px 0 6px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        .aura-message .msg-bubble h1 {
+            font-size: 15px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 5px;
+        }
+
+        .aura-message .msg-bubble p { margin: 6px 0; }
+
+        .aura-message .msg-bubble strong {
+            color: #dddde0;
             font-weight: 600;
         }
 
-        .aura-message .sender { color: #1e90ff; }
-        .user-message .sender { color: #4a7fa8; text-align: right; }
+        .aura-message .msg-bubble em {
+            color: var(--gold);
+            font-style: normal;
+        }
 
-        .thinking {
+        .aura-message .msg-bubble ul,
+        .aura-message .msg-bubble ol {
+            margin: 6px 0 6px 16px;
+        }
+
+        .aura-message .msg-bubble li { margin: 3px 0; color: var(--text-main); }
+
+        .aura-message .msg-bubble code {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            background: var(--bg-root);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 1px 5px;
+            color: var(--accent);
+        }
+
+        .aura-message .msg-bubble pre {
+            background: var(--bg-root);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 12px 14px;
+            margin: 10px 0;
+            overflow-x: auto;
+            font-family: var(--font-mono);
+            font-size: 14px;
+            color: var(--accent);
+            line-height: 1.6;
+        }
+
+        .aura-message .msg-bubble pre code {
+            background: none;
+            border: none;
+            padding: 0;
+        }
+
+        .aura-message .msg-bubble hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 12px 0;
+        }
+
+        .aura-message .msg-bubble blockquote {
+            border-left: 2px solid var(--accent);
+            padding-left: 12px;
+            color: var(--text-dim);
+            margin: 8px 0;
+        }
+
+        /* Threat indicators */
+        .aura-message .msg-bubble .threat-high { color: #c85a5a; font-weight: 600; }
+        .aura-message .msg-bubble .threat-med  { color: var(--gold); font-weight: 600; }
+        .aura-message .msg-bubble .threat-low  { color: var(--green); font-weight: 600; }
+
+        /* Thinking */
+        .thinking-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 4px 0;
+        }
+
+        .thinking-label {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 2px;
+        }
+
+        .thinking-dots {
             display: flex;
             gap: 4px;
-            padding: 8px 0;
         }
 
-        .thinking span {
-            width: 6px;
-            height: 6px;
-            background: #1e90ff;
+        .thinking-dots span {
+            width: 5px;
+            height: 5px;
+            background: var(--accent);
             border-radius: 50%;
-            animation: bounce 1.2s infinite;
+            animation: bounce 1.4s infinite;
+            opacity: 0.4;
         }
 
-        .thinking span:nth-child(2) { animation-delay: 0.2s; }
-        .thinking span:nth-child(3) { animation-delay: 0.4s; }
+        .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
 
         @keyframes bounce {
-            0%, 100% { transform: translateY(0); opacity: 0.4; }
-            50% { transform: translateY(-6px); opacity: 1; }
+            0%, 100% { transform: translateY(0); opacity: 0.3; }
+            50% { transform: translateY(-4px); opacity: 1; }
         }
 
-        #input-area {
-            padding: 16px 20px;
-            background: #0d1b2a;
-            border-top: 1px solid #1e90ff22;
+        /* ── INPUT AREA ── */
+        .input-wrap {
+            padding: 16px 20px 20px;
+            background: var(--bg-panel);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .input-row {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             align-items: flex-end;
         }
 
         #user-input {
             flex: 1;
-            background: #0a0e1a;
-            border: 1px solid #1e90ff33;
-            border-radius: 6px;
-            color: #c8d8e8;
-            padding: 12px 16px;
-            font-size: 14px;
-            font-family: 'Segoe UI', sans-serif;
+            background: var(--bg-root);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            color: var(--text-main);
+            padding: 11px 14px;
+            font-size: 17px;
+            font-family: var(--font-body);
             resize: none;
-            min-height: 44px;
-            max-height: 120px;
+            min-height: 42px;
+            max-height: 140px;
             outline: none;
-            transition: border-color 0.2s;
+            transition: border-color 0.15s;
+            line-height: 1.5;
         }
 
-        #user-input:focus { border-color: #1e90ff66; }
-        #user-input::placeholder { color: #2a4a6a; }
+        #user-input:focus { border-color: var(--accent); }
+        #user-input::placeholder { color: var(--text-muted); font-size: 16px; }
 
         #send-btn {
-            background: #1e90ff;
-            color: #0a0e1a;
-            border: none;
-            border-radius: 6px;
-            padding: 12px 20px;
-            font-size: 13px;
-            font-weight: 700;
+            background: var(--bg-raise);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
             cursor: pointer;
+            padding: 0 16px;
+            height: 42px;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        #send-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--accent);
+        }
+
+        #send-btn:disabled {
+            color: var(--text-muted);
+            border-color: var(--border-dim);
+            cursor: not-allowed;
+        }
+
+        .input-hint {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
             letter-spacing: 1px;
-            transition: background 0.2s;
-            height: 44px;
-        }
-
-        #send-btn:hover { background: #4aa8ff; }
-        #send-btn:disabled { background: #1a3a5a; color: #2a4a6a; cursor: not-allowed; }
-
-        /* ── WELCOME SCREEN ── */
-        .welcome {
-            text-align: center;
-            padding: 32px 24px;
-            color: #2a4a6a;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .welcome h2 {
-            font-size: 20px;
-            color: #1e90ff;
-            letter-spacing: 4px;
-            margin-bottom: 8px;
-        }
-
-        .welcome p {
-            font-size: 13px;
-            line-height: 1.8;
-            margin-bottom: 24px;
-            color: #3a5a7a;
-        }
-
-        .capability-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            text-align: left;
             margin-top: 8px;
         }
 
-        .cap-card {
-            background: #0d1b2a;
-            border: 1px solid #1e90ff22;
+        /* ── CAPABILITIES SIDEBAR ── */
+        .cap-sidebar {
+            width: 310px;
+            flex-shrink: 0;
+            background: var(--bg-panel);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .cap-header {
+            padding: 14px 18px 12px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .cap-header-title {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+
+        .cap-header-sub {
+            font-size: 14px;
+            color: var(--text-dim);
+            margin-top: 3px;
+        }
+
+        .cap-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 14px 14px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .cap-scroll::-webkit-scrollbar { width: 3px; }
+        .cap-scroll::-webkit-scrollbar-thumb { background: var(--border); }
+
+        /* Capability group */
+        .cap-group {
+            background: var(--bg-raise);
+            border: 1px solid var(--border-dim);
             border-radius: 6px;
-            padding: 12px;
+            overflow: hidden;
+        }
+
+        .cap-group-header {
+            padding: 10px 13px;
             cursor: pointer;
-            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: background 0.15s;
         }
 
-        .cap-card:hover {
-            border-color: #1e90ff55;
-            background: #1a2f4a;
+        .cap-group-header:hover { background: var(--bg-hover); }
+
+        .cap-group-left {
+            display: flex;
+            align-items: center;
+            gap: 9px;
         }
 
-        .cap-card .cap-icon { font-size: 20px; margin-bottom: 6px; }
-        .cap-card .cap-title { font-size: 12px; font-weight: 600; color: #1e90ff; letter-spacing: 1px; margin-bottom: 4px; }
-        .cap-card .cap-desc { font-size: 11px; color: #3a5a7a; line-height: 1.5; }
-        .cap-card .cap-status { font-size: 10px; margin-top: 6px; letter-spacing: 1px; }
+        .cap-group-icon { font-size: 16px; }
+
+        .cap-group-name {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        .cap-group-chevron {
+            font-size: 8px;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+        }
+
+        .cap-group.open .cap-group-chevron { transform: rotate(180deg); }
+
+        .cap-group-body {
+            display: none;
+            border-top: 1px solid var(--border-dim);
+            padding: 8px;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .cap-group.open .cap-group-body { display: flex; }
+        .cap-group.closed .cap-group-body { display: none; }
+
+        .cap-query {
+            background: var(--bg-root);
+            border: 1px solid var(--border-dim);
+            border-radius: 4px;
+            padding: 8px 10px;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .cap-query:hover {
+            border-color: var(--accent);
+            background: var(--bg-panel);
+        }
+
+        .cap-query-icon {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 2px;
+            flex-shrink: 0;
+        }
+
+        .cap-query-content { flex: 1; min-width: 0; }
+
+        .cap-query-label {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 3px;
+        }
+
+        .cap-query-text {
+            font-size: 14px;
+            color: var(--text-dim);
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        /* ── FOOTER ── */
+        footer {
+            height: 30px;
+            background: var(--bg-root);
+            border-top: 1px solid var(--border-dim);
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            gap: 16px;
+            flex-shrink: 0;
+        }
+
+        .footer-text {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+        }
+
+        .footer-link {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+            text-decoration: none;
+            letter-spacing: 1px;
+            transition: color 0.15s;
+        }
+
+        .footer-link:hover { color: var(--accent); }
+
+        .footer-sep { color: var(--border); }
     </style>
 </head>
 <body>
 
+<!-- HEADER -->
 <header>
-    <div>
-        <div class="aura-logo">AURA</div>
-        <div class="aura-subtitle">Autonomous Universal Reconnaissance & Analysis</div>
+    <div class="logo-block">
+        <span class="logo">AURA</span>
+        <span class="logo-sep">/</span>
+        <span class="logo-sub">Autonomous Universal Reconnaissance &amp; Analysis</span>
     </div>
-    <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
-        <div class="status-dot"></div>
-        <div class="status-text">ONLINE</div>
+    <div class="header-right">
+        <a href="https://github.com/cyberstasi/abyss-eye" target="_blank" class="github-link">
+            github.com/cyberstasi/abyss-eye
+        </a>
+        <div class="status-pill">
+            <div class="status-dot"></div>
+            <span class="status-text">ONLINE</span>
+        </div>
     </div>
 </header>
 
-<div class="main-layout">
+<!-- BODY -->
+<div class="body-layout">
 
-    <!-- SIDEBAR -->
-    <div class="sidebar">
-        <div class="sidebar-section">
-            <div class="sidebar-label">Modes</div>
-
-            <button class="mode-btn active" onclick="setMode(this, 'general', '🧠', 'General Intelligence', 'Ask me anything EVE related')">
-                <span class="mode-icon">🧠</span>
-                <div class="mode-info">
-                    <span class="mode-name">General</span>
-                    <span class="mode-status status-online">● ONLINE</span>
-                </div>
-            </button>
-
-            <button class="mode-btn" onclick="setMode(this, 'hunter', '🔴', 'Hunter Mode', 'Pilot & corp threat assessment')">
-                <span class="mode-icon">🔴</span>s
-                <div class="mode-info">
-                    <span class="mode-name">Hunter</span>
-                    <span class="mode-status status-online">● ONLINE</span>
-                </div>
-            </button>
-
-            <button class="mode-btn" onclick="setMode(this, 'wormholer', '🕳️', 'Wormholer Mode', 'Chain intel & J-space ops')">
-                <span class="mode-icon">🕳️</span>
-                <div class="mode-info">
-                    <span class="mode-name">Wormholer</span>
-                    <span class="mode-status status-soon">◌ COMING SOON</span>
-                </div>
-            </button>
-
-            <button class="mode-btn" onclick="setMode(this, 'trader', '💰', 'Trader Mode', 'Markets, arbitrage & appraisal')">
-                <span class="mode-icon">💰</span>
-                <div class="mode-info">
-                    <span class="mode-name">Trader</span>
-                    <span class="mode-status status-soon">◌ COMING SOON</span>
-                </div>
-            </button>
-
-            <button class="mode-btn" onclick="setMode(this, 'combat', '⚔️', 'Combat Advisor', 'Can I take this fight?')">
-                <span class="mode-icon">⚔️</span>
-                <div class="mode-info">
-                    <span class="mode-name">Combat Advisor</span>
-                    <span class="mode-status status-soon">◌ COMING SOON</span>
-                </div>
-            </button>
-        </div>
-
-        <div class="quick-section">
-            <div class="sidebar-label">Quick Queries</div>
-            <button class="quick-btn" onclick="quickSend('What are the best ships for C5 ratting?')">⚡ C5 Ratting Ships</button>
-            <button class="quick-btn" onclick="quickSend('Explain wormhole mass mechanics in detail')">⚡ WH Mass Mechanics</button>
-            <button class="quick-btn" onclick="quickSend('Give me a solid Loki small gang PvP fit')">⚡ Loki PvP Fit</button>
-            <button class="quick-btn" onclick="quickSend('What is the best way to make ISK in C5 wormhole space?')">⚡ WH ISK Making</button>
-            <button class="quick-btn" onclick="quickSend('Explain how to roll a wormhole safely')">⚡ Rolling Holes</button>
-            <button class="quick-btn" onclick="quickSend('What PI products are most valuable for wormhole space?')">⚡ PI Products</button>
-        </div>
-    </div>
-
-    <!-- CHAT AREA -->
-    <div class="chat-area">
-
-        <div class="mode-banner">
-            <span class="banner-icon" id="banner-icon">🧠</span>
-            <span class="banner-name" id="banner-name">GENERAL INTELLIGENCE</span>
-            <span class="banner-desc" id="banner-desc">— Ask me anything EVE related</span>
-        </div>
+    <!-- CHAT -->
+    <div class="chat-col">
 
         <div id="chat-container">
-            <div class="welcome">
-                <h2>AURA ONLINE</h2>
-                <p>Your EVE Intelligence Assistant is ready.<br>
-                Select a mode from the sidebar or ask anything below.</p>
-
-                <div class="capability-grid">
-                    <div class="cap-card" onclick="quickSend('What can you help me with in EVE Online?')">
-                        <div class="cap-icon">🧠</div>
-                        <div class="cap-title">GENERAL INTEL</div>
-                        <div class="cap-desc">Ship fits, mechanics, doctrines, wormhole ops, industry, lore</div>
-                        <div class="cap-status status-online">● ONLINE</div>
-                    </div>
-                    <div class="cap-card" onclick="quickSend('What will Hunter mode do when its ready?')">
-                        <div class="cap-icon">🔴</div>
-                        <div class="cap-title">HUNTER MODE</div>
-                        <div class="cap-desc">Threat cards, kill history, corp analysis via zKillboard & ESI</div>
-                        <div class="cap-status status-soon">◌ COMING SOON</div>
-                    </div>
-                    <div class="cap-card" onclick="quickSend('What will Wormholer mode do when its ready?')">
-                        <div class="cap-icon">🕳️</div>
-                        <div class="cap-title">WORMHOLER MODE</div>
-                        <div class="cap-desc">Live chain intel, mass tracking, sig alerts via Wanderer</div>
-                        <div class="cap-status status-soon">◌ COMING SOON</div>
-                    </div>
-                    <div class="cap-card" onclick="quickSend('What will Trader mode do when its ready?')">
-                        <div class="cap-icon">💰</div>
-                        <div class="cap-title">TRADER MODE</div>
-                        <div class="cap-desc">Arbitrage scanner, loot appraisal, market trends</div>
-                        <div class="cap-status status-soon">◌ COMING SOON</div>
-                    </div>
-                    <div class="cap-card" onclick="quickSend('What will Combat Advisor mode do when its ready?')" style="grid-column: span 2;">
-                        <div class="cap-icon">⚔️</div>
-                        <div class="cap-title">COMBAT ADVISOR</div>
-                        <div class="cap-desc">Pull enemy fit from kill mail, compare vs your fit, get a fight recommendation with tactical breakdown</div>
-                        <div class="cap-status status-soon">◌ COMING SOON</div>
-                    </div>
+            <div class="welcome" id="welcome-screen">
+                <div class="welcome-glyph">// SYSTEM READY //</div>
+                <div class="welcome-title">AURA</div>
+                <div class="welcome-tagline">
+                    Real-time EVE Online intelligence.<br>
+                    Pilot analysis. Corp dossiers. Market data.<br>
+                    Combat assessment. J-space reconnaissance.
                 </div>
+                <div class="welcome-hint">Browse capabilities → or ask anything below</div>
             </div>
         </div>
 
-        <div id="input-area">
-            <textarea
-                id="user-input"
-                placeholder="Ask AURA anything..."
-                rows="1"
-                onkeydown="handleKey(event)"
-            ></textarea>
-            <button id="send-btn" onclick="sendMessage()">SEND</button>
+        <div class="input-wrap">
+            <div class="input-row">
+                <textarea
+                    id="user-input"
+                    placeholder="Ask AURA anything — pilot name, system, market query, kill ID..."
+                    rows="1"
+                    onkeydown="handleKey(event)"
+                ></textarea>
+                <button id="send-btn" onclick="sendMessage()">SEND ↑</button>
+            </div>
+            <div class="input-hint">ENTER to send &nbsp;·&nbsp; SHIFT+ENTER for new line</div>
         </div>
 
     </div>
+
+    <!-- CAPABILITIES SIDEBAR -->
+    <div class="cap-sidebar">
+        <div class="cap-header">
+            <div class="cap-header-title">Capabilities</div>
+            <div class="cap-header-sub">Click any query to use it</div>
+        </div>
+        <div class="cap-scroll" id="cap-scroll"></div>
+    </div>
+
 </div>
 
+<!-- FOOTER -->
+<footer>
+    <span class="footer-text">AURA v1.0</span>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/cyberstasi/abyss-eye" target="_blank" class="footer-link">github.com/cyberstasi/abyss-eye</a>
+    <span class="footer-sep">·</span>
+    <span class="footer-text">Built for wormhole operations</span>
+    <span class="footer-sep">·</span>
+    <span class="footer-text">Powered by Anthropic Claude</span>
+</footer>
+
 <script>
-    const chatContainer = document.getElementById('chat-container');
-    const userInput = document.getElementById('user-input');
-    const sendBtn = document.getElementById('send-btn');
-
-    let currentMode = 'general';
-    let currentModeLabel = 'GENERAL INTELLIGENCE';
-
-    function setMode(btn, mode, icon, name, desc) {
-        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMode = mode;
-        currentModeLabel = name.toUpperCase();
-        document.getElementById('banner-icon').textContent = icon;
-        document.getElementById('banner-name').textContent = name.toUpperCase();
-        document.getElementById('banner-desc').textContent = '— ' + desc;
+// ── CAPABILITIES DATA ──
+const CAPABILITIES = [
+    {
+        icon: '🔴',
+        name: 'Hunter Mode',
+        open: true,
+        queries: [
+            {
+                label: 'Pilot Threat Card',
+                text: 'Look up pilot Progodlegend',
+                desc: 'Full threat assessment — kills, ships, timezone, solo/fleet behavior, WH flag'
+            },
+            {
+                label: 'Corp Dossier',
+                text: 'Give me a full intel report on Hard Knocks Citizens',
+                desc: 'Alliance, member count, ISK efficiency, capital capability, dominant TZ'
+            },
+            {
+                label: 'Most Dangerous Pilots',
+                text: 'Who are the most dangerous pilots in Pandemic Legion?',
+                desc: 'Top pilots by kill count, K/D ratio, and primary ship'
+            },
+            {
+                label: 'Recruit Screening',
+                text: 'Run a full background check on pilot Xenuria — I am considering recruiting them',
+                desc: 'Awox history, corp history, activity patterns, red flags'
+            },
+        ]
+    },
+    {
+        icon: '🕳️',
+        name: 'Wormholer Mode',
+        open: false,
+        queries: [
+            {
+                label: 'Full System Intel',
+                text: 'Give me full intel on wormhole system J131948',
+                desc: 'WH class, residents, activity level, capital kills, dominant timezone'
+            },
+            {
+                label: 'Who Lives Here',
+                text: 'Who are the likely residents of J170141 and what timezone are they?',
+                desc: 'Identifies resident corps from multi-day kill patterns'
+            },
+            {
+                label: 'Activity Assessment',
+                text: 'Is J105934 currently active and is it safe to run sites?',
+                desc: 'Recent kill activity, last seen timestamps, risk rating'
+            },
+            {
+                label: 'Eviction Target Research',
+                text: 'Research J115422 — I want to know if this system is worth evicting',
+                desc: 'Corp strength, capital assets, activity hours, structure presence'
+            },
+        ]
+    },
+    {
+        icon: '💹',
+        name: 'Trader Mode',
+        open: false,
+        queries: [
+            {
+                label: 'Live Price Check',
+                text: 'What is the current Jita buy and sell price for a Tengu?',
+                desc: 'Live Fuzzwork data — buy/sell/spread/volume'
+            },
+            {
+                label: 'Loot Appraisal',
+                text: 'Appraise this loot:\nNightmare x 1\nMachariél x 1\nFaction modules x various',
+                desc: 'Paste any cargo scan or loot list for instant Jita valuation'
+            },
+            {
+                label: 'Blue Loot Valuation',
+                text: 'Value this blue loot:\nSleeper Mainframe x 4\nSleeper Preserved Relic x 6\nSleeper Ancient Coords Database x 2',
+                desc: 'Fixed NPC buy prices for all Sleeper and Talocan loot'
+            },
+            {
+                label: 'Haul Profitability',
+                text: 'I have 850M ISK in loot at 1,200 m3. What will I net after Pushx and taxes?',
+                desc: 'Net profit after hauling fees, broker fee, and sales tax'
+            },
+            {
+                label: 'Fit Cost Estimate',
+                text: 'How much does this fit cost?\n\n[Tengu, WH Hunter]\nTengu Defensive - Covert Reconfiguration\nTengu Offensive - Accelerated Ejection Bay\nTengu Propulsion - Intercalated Nanofibers\nTengu Electronics - Dissolution Sequencer\nTengu Engineering - Augmented Capacitor Reservoir\n\nHeavy Assault Missile Launcher II\nHeavy Assault Missile Launcher II\nHeavy Assault Missile Launcher II\nHeavy Assault Missile Launcher II\nCovert Ops Cloaking Device II\n\nGist X-Type 100MN Afterburner\nLarge Shield Extender II\nLarge Shield Extender II\nWarp Scrambler II\nStasis Webifier II\n\nDamage Control II\nBallistic Control System II\nBallistic Control System II',
+                desc: 'Full EFT fit pricing with per-module breakdown and fit validation'
+            },
+        ]
+    },
+    {
+        icon: '⚔️',
+        name: 'Combat Advisor',
+        open: false,
+        queries: [
+            {
+                label: 'Analyze Enemy Kill',
+                text: 'Analyze kill 133837880 — what was the enemy flying and how dangerous are they?',
+                desc: 'Extracts full fit, fight duration, logi presence, and attacker breakdown'
+            },
+            {
+                label: 'Head-to-Head Comparison',
+                text: 'Analyze kill 133837880 and compare it against my fit:\n\n[Tengu, WH Hunter]\nTengu Defensive - Covert Reconfiguration\nTengu Offensive - Accelerated Ejection Bay\nTengu Propulsion - Intercalated Nanofibers\nTengu Electronics - Dissolution Sequencer\nTengu Engineering - Augmented Capacitor Reservoir\n\nHeavy Assault Missile Launcher II x4\nCovert Ops Cloaking Device II\n\nGist X-Type 100MN Afterburner\nLarge Shield Extender II x2\nWarp Scrambler II\nStasis Webifier II\n\nDamage Control II\nBallistic Control System II x2',
+                desc: 'Win/loss conditions, range matchup, tackle analysis, FC recommendation'
+            },
+            {
+                label: 'Fit Validation',
+                text: 'Validate this fit and tell me if anything is wrong:\n\n[Stabber, Test Fit]\n650mm Artillery Cannon II\n650mm Artillery Cannon II\n\n100MN Afterburner II\nLarge Shield Extender II\nWarp Scrambler II\n\nGyrostabilizer II\nDamage Control II',
+                desc: 'Checks slot counts, prop mod sizing, impossible module combos'
+            },
+            {
+                label: 'Tactical Advice',
+                text: 'My corp found a Proteus camping our static. We have a Tengu, a Loki, and a Sabre. Should we engage and how?',
+                desc: 'FC-grade tactical breakdown — engagement advice, positioning, priorities'
+            },
+        ]
+    },
+    {
+        icon: '🧠',
+        name: 'General Intelligence',
+        open: false,
+        queries: [
+            {
+                label: 'Doctrine Advice',
+                text: 'What is the best small gang doctrine for a 5-man wormhole corp that wants to fight larger groups?',
+                desc: 'Ship selection, roles, fits, engagement tactics'
+            },
+            {
+                label: 'Ship Recommendation',
+                text: 'I want to solo hunt in C3 wormholes with a budget of 500M ISK. What should I fly?',
+                desc: 'Budget-aware ship and fit recommendations'
+            },
+            {
+                label: 'Mechanics Explainer',
+                text: 'Explain wormhole mass mechanics and how to roll a hole without getting stranded',
+                desc: 'Detailed mechanics explanation with practical advice'
+            },
+            {
+                label: 'ISK Strategy',
+                text: 'My 10-man C5 corp wants to maximize ISK per hour. What should our primary ISK activity be?',
+                desc: 'Corp-size-aware ISK strategy with realistic estimates'
+            },
+        ]
     }
+];
 
-    function handleKey(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    }
+// ── BUILD SIDEBAR ──
+function buildSidebar() {
+    const container = document.getElementById('cap-scroll');
+    CAPABILITIES.forEach((group, gi) => {
+        const div = document.createElement('div');
+        div.className = 'cap-group ' + (group.open ? 'open' : 'closed');
 
-    userInput.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        const header = document.createElement('div');
+        header.className = 'cap-group-header';
+        header.innerHTML =
+            '<div class="cap-group-left">' +
+            '<span class="cap-group-icon">' + group.icon + '</span>' +
+            '<span class="cap-group-name">' + group.name + '</span>' +
+            '</div>' +
+            '<span class="cap-group-chevron">&#9660;</span>';
+        header.addEventListener('click', function() { toggleGroup(header); });
+
+        const body = document.createElement('div');
+        body.className = 'cap-group-body';
+
+        group.queries.forEach(function(q) {
+            const row = document.createElement('div');
+            row.className = 'cap-query';
+            row.innerHTML =
+                '<span class="cap-query-icon">&#8594;</span>' +
+                '<div class="cap-query-content">' +
+                '<div class="cap-query-label">' + escapeHtml(q.label) + '</div>' +
+                '<div class="cap-query-text">' + escapeHtml(q.desc) + '</div>' +
+                '</div>';
+            row.addEventListener('click', (function(text) {
+                return function() { fillQuery(text); };
+            })(q.text));
+            body.appendChild(row);
+        });
+
+        div.appendChild(header);
+        div.appendChild(body);
+        container.appendChild(div);
     });
+}
 
-    function quickSend(text) {
-        userInput.value = text;
+function toggleGroup(header) {
+    const group = header.parentElement;
+    group.classList.toggle('open');
+    group.classList.toggle('closed');
+}
+
+function fillQuery(text) {
+    const input = document.getElementById('user-input');
+    input.value = text;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+    input.focus();
+}
+
+buildSidebar();
+
+// ── CHAT ──
+const chatContainer = document.getElementById('chat-container');
+const userInput = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+
+function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
         sendMessage();
     }
+}
 
-    function addMessage(sender, text, isUser) {
-        const div = document.createElement('div');
-        div.className = `message ${isUser ? 'user-message' : 'aura-message'}`;
-        div.innerHTML = `<div class="sender">${sender}</div>${escapeHtml(text)}`;
-        chatContainer.appendChild(div);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-        return div;
+userInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+});
+
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function renderMarkdown(text) {
+    let h = escapeHtml(text);
+    h = h.replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    h = h.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    h = h.replace(/^---$/gm, '<hr>');
+    h = h.replace(/^[\t ]*[-•] (.+)$/gm, '<li>$1</li>');
+    h = h.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
+    h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    h = h.replace(/\n\n+/g, '</p><p>');
+    h = h.replace(/\n/g, '<br>');
+    h = `<p>${h}</p>`;
+    h = h.replace(/<p>\s*<\/p>/g, '');
+    ['h1','h2','h3','ul','pre','hr','blockquote'].forEach(tag => {
+        h = h.replace(new RegExp(`<p>(<${tag}>)`, 'g'), '$1');
+        h = h.replace(new RegExp(`(<\\/${tag}>)<\\/p>`, 'g'), '$1');
+    });
+    return h;
+}
+
+function addMessage(role, text) {
+    const isUser = role === 'user';
+    const div = document.createElement('div');
+    div.className = `message ${isUser ? 'user-message' : 'aura-message'}`;
+
+    const meta = isUser ? 'YOU' : 'AURA';
+    const body = isUser
+        ? `<div class="msg-meta">${meta}</div><div class="msg-bubble">${escapeHtml(text)}</div>`
+        : `<div class="msg-meta">${meta}</div><div class="msg-bubble">${renderMarkdown(text)}</div>`;
+
+    div.innerHTML = body;
+    chatContainer.appendChild(div);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    return div;
+}
+
+function addThinking() {
+    const div = document.createElement('div');
+    div.className = 'message aura-message';
+    div.id = 'thinking';
+    div.innerHTML = `
+        <div class="msg-meta">AURA</div>
+        <div class="msg-bubble">
+            <div class="thinking-wrap">
+                <span class="thinking-label">PROCESSING</span>
+                <div class="thinking-dots"><span></span><span></span><span></span></div>
+            </div>
+        </div>`;
+    chatContainer.appendChild(div);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+function removeThinking() {
+    const t = document.getElementById('thinking');
+    if (t) t.remove();
+}
+
+async function sendMessage() {
+    const text = userInput.value.trim();
+    if (!text) return;
+
+    const welcome = document.getElementById('welcome-screen');
+    if (welcome) welcome.remove();
+
+    addMessage('user', text);
+    userInput.value = '';
+    userInput.style.height = 'auto';
+    sendBtn.disabled = true;
+    addThinking();
+
+    try {
+        const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
+        });
+        const data = await res.json();
+        removeThinking();
+        addMessage('aura', data.response);
+    } catch (err) {
+        removeThinking();
+        addMessage('aura', '⚠️ Connection error — is the server running?');
     }
 
-    function escapeHtml(text) {
-        return text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
-    }
-
-    function addThinking() {
-        const div = document.createElement('div');
-        div.className = 'message aura-message';
-        div.id = 'thinking';
-        div.innerHTML = `<div class="sender">AURA</div><div class="thinking"><span></span><span></span><span></span></div>`;
-        chatContainer.appendChild(div);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-
-    function removeThinking() {
-        const t = document.getElementById('thinking');
-        if (t) t.remove();
-    }
-
-    async function sendMessage() {
-        const text = userInput.value.trim();
-        if (!text) return;
-
-        const welcome = chatContainer.querySelector('.welcome');
-        if (welcome) welcome.remove();
-
-        addMessage('YOU', text, true);
-        userInput.value = '';
-        userInput.style.height = 'auto';
-        sendBtn.disabled = true;
-        addThinking();
-
-        const modePrefix = currentMode !== 'general'
-            ? `[MODE: ${currentModeLabel}] `
-            : '';
-
-        try {
-            const res = await fetch('/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: modePrefix + text })
-            });
-            const data = await res.json();
-            removeThinking();
-            addMessage('AURA', data.response, false);
-        } catch (err) {
-            removeThinking();
-            addMessage('AURA', 'Connection error. Is the server running?', false);
-        }
-
-        sendBtn.disabled = false;
-        userInput.focus();
-    }
+    sendBtn.disabled = false;
+    userInput.focus();
+}
 </script>
 
 </body>
