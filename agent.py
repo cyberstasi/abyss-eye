@@ -11,6 +11,8 @@ from tools.zkill import (get_pilot_kills, get_pilot_losses,
                           get_corp_top_pilots)
 from tools.dotlan import get_full_system_intel
 from tools.wormhole import get_full_wormhole_intel
+from tools.trader import (appraise_loot, get_market_price, calculate_haul,
+                           value_blue_loot, get_fit_cost)
 
 load_dotenv()
 
@@ -53,7 +55,7 @@ CORP INTEL must always include:
 - Tactical recommendation
 
 CORP TOP PILOTS must always include:
-- Ranked pilot list with kill counts
+- Ranked pilot list with kill counts and K/D ratio
 - Most used ship per pilot
 - Brief threat note on top 3
 
@@ -69,6 +71,12 @@ WORMHOLE INTEL must always include:
 - Activity pattern and dominant timezone
 - Capital activity flag
 - Tactical recommendation
+
+TRADER responses must always include:
+- Clear ISK totals in readable format (B/M suffix)
+- Buy vs sell price where relevant
+- Net profit after fees where applicable
+- Clear recommendation
 
 Always be concise. Format responses cleanly. Use emoji for threat levels
 and status indicators."""
@@ -110,8 +118,8 @@ TOOLS = [
     {
         "name": "get_corp_top_pilots",
         "description": """Get the most active and dangerous pilots in a corporation
-        by analyzing recent kill activity. Returns pilot names, kill counts, and
-        most used ships. Use when asked who the dangerous pilots are in a corp,
+        by analyzing recent kill activity. Returns pilot names, kill counts, K/D ratio,
+        and most used ships. Use when asked who the dangerous pilots are in a corp,
         who to watch out for, or who the FCs are.""",
         "input_schema": {
             "type": "object",
@@ -156,77 +164,134 @@ TOOLS = [
             },
             "required": ["system_name"]
         }
+    },
+    {
+        "name": "appraise_loot",
+        "description": """Appraise a list of items using Janice to get Jita buy/sell value.
+        Use when a user pastes loot, a cargo scan, or asks what their items are worth.
+        Input should be item names with optional quantities like 'Tritanium x 1000'.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "loot_text": {
+                    "type": "string",
+                    "description": "Raw loot list, one item per line. Format: 'Item Name x Quantity' or just 'Item Name'"
+                }
+            },
+            "required": ["loot_text"]
+        }
+    },
+    {
+        "name": "get_market_price",
+        "description": """Get current Jita buy and sell price for a specific EVE item.
+        Use when a user asks what something is worth or what the current price is.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_name": {
+                    "type": "string",
+                    "description": "The exact name of the EVE item"
+                }
+            },
+            "required": ["item_name"]
+        }
+    },
+    {
+        "name": "calculate_haul",
+        "description": """Calculate net profit after hauling fees and taxes for a loot haul.
+        Use when a user wants to know if a haul is worth it or what they'll net after fees.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "loot_value_isk": {
+                    "type": "number",
+                    "description": "Total ISK value of the loot"
+                },
+                "volume_m3": {
+                    "type": "number",
+                    "description": "Volume of the loot in m3. Use 0 if unknown."
+                }
+            },
+            "required": ["loot_value_isk"]
+        }
+    },
+    {
+        "name": "value_blue_loot",
+        "description": """Value wormhole blue loot using fixed NPC buy prices.
+        Use when a user asks about blue loot value from WH sites like Sleeper loot.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "loot_text": {
+                    "type": "string",
+                    "description": "Blue loot list, one item per line. Format: 'Item Name x Quantity'"
+                }
+            },
+            "required": ["loot_text"]
+        }
+    },
+    {
+        "name": "get_fit_cost",
+        "description": """Calculate the Jita market cost of an EVE ship fitting.
+        Accepts EFT format fits. Use when a user pastes a fit and wants to know what it costs.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "fit_text": {
+                    "type": "string",
+                    "description": "Ship fitting in EFT format"
+                }
+            },
+            "required": ["fit_text"]
+        }
     }
 ]
 
 
 async def get_pilot_intel(pilot_name: str) -> str:
-    """Fetch full pilot intel from ESI and zKillboard."""
     try:
         profile = await get_full_pilot_profile(pilot_name)
         if not profile:
             return f"No pilot found with name '{pilot_name}'"
-
         character_id = profile["character_id"]
-
         kills, losses, stats = await asyncio.gather(
             get_pilot_kills(character_id),
             get_pilot_losses(character_id),
             get_pilot_stats(character_id)
         )
-
-        analysis = await analyze_pilot_killboard(
-            kills, losses, stats, character_id
-        )
-
-        return json.dumps({
-            "profile": profile,
-            "analysis": analysis
-        }, indent=2)
-
+        analysis = await analyze_pilot_killboard(kills, losses, stats, character_id)
+        return json.dumps({"profile": profile, "analysis": analysis}, indent=2)
     except Exception as e:
         return f"Error fetching pilot intel: {str(e)}"
 
 
 async def get_corp_intel(corp_name: str) -> str:
-    """Fetch full corp intel from ESI and zKillboard."""
     try:
         corp = await search_corporation(corp_name)
         if not corp:
             return f"No corporation found with name '{corp_name}'"
-
         corp_id = corp["corporation_id"]
-
         kills, losses, stats = await asyncio.gather(
             get_corp_kills(corp_id),
             get_corp_losses(corp_id),
             get_corp_stats(corp_id)
         )
-
         isk_destroyed = stats.get("iskDestroyed", 0)
         isk_lost = stats.get("iskLost", 0)
-        efficiency = 0
-        if isk_destroyed + isk_lost > 0:
-            efficiency = round(
-                (isk_destroyed / (isk_destroyed + isk_lost)) * 100, 1
-            )
-
+        efficiency = round(
+            (isk_destroyed / (isk_destroyed + isk_lost)) * 100, 1
+        ) if isk_destroyed + isk_lost > 0 else 0
         timezones = {}
         for kill in kills[:25]:
             for label in kill.get("zkb", {}).get("labels", []):
                 if label.startswith("tz:"):
                     tz = label.replace("tz:", "").upper()
                     timezones[tz] = timezones.get(tz, 0) + 1
-
-        dominant_tz = max(
-            timezones, key=timezones.get
-        ) if timezones else "Unknown"
-
+        dominant_tz = max(timezones, key=timezones.get) if timezones else "Unknown"
         capital_capable = any(
             loss.get("zkb", {}).get("totalValue", 0) > 1_000_000_000
             for loss in losses[:10]
         )
-
         return json.dumps({
             "corp_profile": corp,
             "stats": {
@@ -239,13 +304,11 @@ async def get_corp_intel(corp_name: str) -> str:
                 "capital_capable": capital_capable
             }
         }, indent=2)
-
     except Exception as e:
         return f"Error fetching corp intel: {str(e)}"
 
 
 async def get_corp_top_pilots_tool(corp_name: str) -> str:
-    """Fetch top active pilots in a corp from kill data."""
     try:
         corp = await search_corporation(corp_name)
         if not corp:
@@ -262,7 +325,6 @@ async def get_corp_top_pilots_tool(corp_name: str) -> str:
 
 
 async def get_system_intel_tool(system_name: str) -> str:
-    """Fetch full k-space system intel."""
     try:
         intel = await get_full_system_intel(system_name)
         if not intel:
@@ -273,7 +335,6 @@ async def get_system_intel_tool(system_name: str) -> str:
 
 
 async def get_wormhole_intel_tool(system_name: str) -> str:
-    """Fetch full wormhole system intel."""
     try:
         intel = await get_full_wormhole_intel(system_name)
         if not intel:
@@ -283,14 +344,60 @@ async def get_wormhole_intel_tool(system_name: str) -> str:
         return f"Error fetching wormhole intel: {str(e)}"
 
 
+async def appraise_loot_tool(loot_text: str) -> str:
+    try:
+        result = await appraise_loot(loot_text)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error appraising loot: {str(e)}"
+
+
+async def get_market_price_tool(item_name: str) -> str:
+    try:
+        result = await get_market_price(item_name)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error fetching price: {str(e)}"
+
+
+async def calculate_haul_tool(loot_value_isk: float, volume_m3: float = 0) -> str:
+    try:
+        result = await calculate_haul(loot_value_isk, volume_m3)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error calculating haul: {str(e)}"
+
+
+async def value_blue_loot_tool(loot_text: str) -> str:
+    try:
+        result = await value_blue_loot(loot_text)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error valuing blue loot: {str(e)}"
+
+
+async def get_fit_cost_tool(fit_text: str) -> str:
+    try:
+        result = await get_fit_cost(fit_text)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error calculating fit cost: {str(e)}"
+
+
 async def process_tool_call(tool_name: str, tool_input: dict) -> str:
-    """Route tool calls to the correct handler."""
     handlers = {
         "get_pilot_intel": lambda: get_pilot_intel(tool_input["pilot_name"]),
         "get_corp_intel": lambda: get_corp_intel(tool_input["corp_name"]),
         "get_corp_top_pilots": lambda: get_corp_top_pilots_tool(tool_input["corp_name"]),
         "get_system_intel": lambda: get_system_intel_tool(tool_input["system_name"]),
         "get_wormhole_intel": lambda: get_wormhole_intel_tool(tool_input["system_name"]),
+        "appraise_loot": lambda: appraise_loot_tool(tool_input["loot_text"]),
+        "get_market_price": lambda: get_market_price_tool(tool_input["item_name"]),
+        "calculate_haul": lambda: calculate_haul_tool(
+            tool_input["loot_value_isk"], tool_input.get("volume_m3", 0)
+        ),
+        "value_blue_loot": lambda: value_blue_loot_tool(tool_input["loot_text"]),
+        "get_fit_cost": lambda: get_fit_cost_tool(tool_input["fit_text"]),
     }
     handler = handlers.get(tool_name)
     if handler:
@@ -302,11 +409,7 @@ conversation_history = []
 
 
 async def chat_async(user_message: str) -> str:
-    """Main async chat function with tool use support."""
-    conversation_history.append({
-        "role": "user",
-        "content": user_message
-    })
+    conversation_history.append({"role": "user", "content": user_message})
 
     while True:
         response = client.messages.create(
@@ -328,27 +431,15 @@ async def chat_async(user_message: str) -> str:
                         "tool_use_id": block.id,
                         "content": result
                     })
-
-            conversation_history.append({
-                "role": "assistant",
-                "content": response.content
-            })
-            conversation_history.append({
-                "role": "user",
-                "content": tool_results
-            })
+            conversation_history.append({"role": "assistant", "content": response.content})
+            conversation_history.append({"role": "user", "content": tool_results})
 
         else:
             final_text = ""
             for block in response.content:
                 if hasattr(block, "text"):
                     final_text += block.text
-
-            conversation_history.append({
-                "role": "assistant",
-                "content": final_text
-            })
-
+            conversation_history.append({"role": "assistant", "content": final_text})
             return final_text
 
 
