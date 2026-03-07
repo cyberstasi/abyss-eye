@@ -10,7 +10,7 @@ ZKILL_BASE = "https://zkillboard.com/api"
 WH_SHIP_IDS = {
     # T3 Cruisers
     29984, 29986, 29988, 29990,
-    # T3 Destroyers  
+    # T3 Destroyers
     42124, 42132, 42133, 42134, 42135,
     # Recons
     11969, 11957, 11971, 11961, 11963, 11965,
@@ -28,6 +28,7 @@ CAPITAL_SHIP_IDS = {
     22852, 23757, 23911, 24483, 24484, 24690, 28661
 }
 
+
 async def fetch_full_killmail(kill_id: int, kill_hash: str) -> dict:
     """Fetch full killmail details from ESI."""
     url = f"{ESI_BASE}/killmails/{kill_id}/{kill_hash}/"
@@ -38,11 +39,13 @@ async def fetch_full_killmail(kill_id: int, kill_hash: str) -> dict:
         except Exception:
             return {}
 
+
 async def get_pilot_kills(character_id: int, limit: int = 25) -> list:
     url = f"{ZKILL_BASE}/kills/characterID/{character_id}/"
     async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
         res = await client.get(url)
         return res.json()[:limit] if res.status_code == 200 else []
+
 
 async def get_pilot_losses(character_id: int, limit: int = 25) -> list:
     url = f"{ZKILL_BASE}/losses/characterID/{character_id}/"
@@ -50,11 +53,13 @@ async def get_pilot_losses(character_id: int, limit: int = 25) -> list:
         res = await client.get(url)
         return res.json()[:limit] if res.status_code == 200 else []
 
+
 async def get_pilot_stats(character_id: int) -> dict:
     url = f"{ZKILL_BASE}/stats/characterID/{character_id}/"
     async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
         res = await client.get(url)
         return res.json() if res.status_code == 200 else {}
+
 
 async def get_corp_kills(corp_id: int, limit: int = 25) -> list:
     url = f"{ZKILL_BASE}/kills/corporationID/{corp_id}/"
@@ -62,11 +67,13 @@ async def get_corp_kills(corp_id: int, limit: int = 25) -> list:
         res = await client.get(url)
         return res.json()[:limit] if res.status_code == 200 else []
 
+
 async def get_corp_losses(corp_id: int, limit: int = 25) -> list:
     url = f"{ZKILL_BASE}/losses/corporationID/{corp_id}/"
     async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
         res = await client.get(url)
         return res.json()[:limit] if res.status_code == 200 else []
+
 
 async def get_corp_stats(corp_id: int) -> dict:
     url = f"{ZKILL_BASE}/stats/corporationID/{corp_id}/"
@@ -74,11 +81,13 @@ async def get_corp_stats(corp_id: int) -> dict:
         res = await client.get(url)
         return res.json() if res.status_code == 200 else {}
 
+
 async def get_system_kills(system_id: int, limit: int = 25) -> list:
     url = f"{ZKILL_BASE}/kills/solarSystemID/{system_id}/"
     async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
         res = await client.get(url)
         return res.json()[:limit] if res.status_code == 200 else []
+
 
 async def analyze_pilot_killboard(
     kills: list, losses: list, stats: dict, character_id: int
@@ -115,7 +124,6 @@ async def analyze_pilot_killboard(
                 except Exception:
                     continue
 
-    # Analyze ships flown by this pilot
     ships_flown = defaultdict(int)
     gang_sizes = []
     solo_kills = 0
@@ -136,7 +144,6 @@ async def analyze_pilot_killboard(
         if len(attackers) == 1:
             solo_kills += 1
 
-        # Find this pilot in attackers
         for attacker in attackers:
             if attacker.get("character_id") == character_id:
                 ship_id = attacker.get("ship_type_id", 0)
@@ -147,14 +154,12 @@ async def analyze_pilot_killboard(
                 if ship_id in CAPITAL_SHIP_IDS:
                     capital_kills += 1
 
-        # Check for awox — same corp attacking
         victim_corp = kill.get("victim", {}).get("corporation_id")
         for attacker in attackers:
             if (attacker.get("character_id") == character_id and
                     attacker.get("corporation_id") == victim_corp):
                 awox_flags.append(kill.get("killmail_id"))
 
-        # Timezone
         for label in kill.get("zkb", {}).get("labels", []):
             if label.startswith("tz:"):
                 tz = label.replace("tz:", "").upper()
@@ -183,14 +188,11 @@ async def analyze_pilot_killboard(
         timezones, key=timezones.get
     ) if timezones else "Unknown"
 
-    # Activity recency
     if kill_dates:
-        most_recent = kill_dates[0]
-        from datetime import datetime, timezone
+        from datetime import datetime
         try:
-            recent_dt = datetime.strptime(most_recent, "%Y-%m-%d")
-            now = datetime.now()
-            days_since = (now - recent_dt).days
+            recent_dt = datetime.strptime(kill_dates[0], "%Y-%m-%d")
+            days_since = (datetime.now() - recent_dt).days
             if days_since <= 7:
                 recency = f"🔴 VERY RECENT — active {days_since}d ago"
             elif days_since <= 30:
@@ -204,7 +206,6 @@ async def analyze_pilot_killboard(
     else:
         recency = "No recent activity"
 
-    # WH pilot flag
     wh_pilot = wh_kills >= 3 or (
         len(full_kills) > 0 and wh_kills / len(full_kills) > 0.3
     )
@@ -228,24 +229,33 @@ async def analyze_pilot_killboard(
         "solo_kills": solo_kills
     }
 
-async def get_corp_top_pilots(corp_id: int, limit: int = 50) -> list:
-    """Get top active pilots in a corp from recent kill activity."""
-    url = f"{ZKILL_BASE}/kills/corporationID/{corp_id}/"
+
+async def get_corp_top_pilots(corp_id: int, limit: int = 200) -> list:
+    """Get top active pilots in a corp from recent kill and loss activity."""
+
     async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
         try:
-            res = await client.get(url, timeout=10.0)
-            if res.status_code != 200:
-                return []
-            zkill_data = res.json()[:limit]
+            kills_res = await client.get(
+                f"{ZKILL_BASE}/kills/corporationID/{corp_id}/",
+                timeout=10.0
+            )
+            zkill_kills = kills_res.json()[:limit] if kills_res.status_code == 200 else []
+
+            losses_res = await client.get(
+                f"{ZKILL_BASE}/losses/corporationID/{corp_id}/",
+                timeout=10.0
+            )
+            zkill_losses = losses_res.json()[:limit] if losses_res.status_code == 200 else []
         except Exception:
             return []
 
-    # Fetch full kill mails to get attacker details
     pilot_kills = defaultdict(int)
+    pilot_losses = defaultdict(int)
     pilot_ships = defaultdict(set)
 
+    # Process kills — find corp members in attackers
     async with httpx.AsyncClient() as client:
-        for kill in zkill_data:
+        for kill in zkill_kills:
             kill_id = kill.get("killmail_id")
             kill_hash = kill.get("zkb", {}).get("hash")
             if not kill_id or not kill_hash:
@@ -269,15 +279,38 @@ async def get_corp_top_pilots(corp_id: int, limit: int = 50) -> list:
             except Exception:
                 continue
 
-    # Sort by kill count
-    top_pilots = sorted(
-        pilot_kills.items(), key=lambda x: x[1], reverse=True
+        # Process losses — victim is the corp member
+        for loss in zkill_losses:
+            kill_id = loss.get("killmail_id")
+            kill_hash = loss.get("zkb", {}).get("hash")
+            if not kill_id or not kill_hash:
+                continue
+            try:
+                r = await client.get(
+                    f"{ESI_BASE}/killmails/{kill_id}/{kill_hash}/",
+                    timeout=5.0
+                )
+                if r.status_code != 200:
+                    continue
+                full_kill = r.json()
+                victim = full_kill.get("victim", {})
+                if victim.get("corporation_id") == corp_id:
+                    char_id = victim.get("character_id")
+                    if char_id:
+                        pilot_losses[char_id] += 1
+            except Exception:
+                continue
+
+    # Combine all known pilots, sort by kills
+    all_pilots = set(pilot_kills.keys()) | set(pilot_losses.keys())
+    ranked = sorted(
+        all_pilots, key=lambda c: pilot_kills.get(c, 0), reverse=True
     )[:10]
 
-    # Resolve character names and ship names
+    # Resolve names and ships
     results = []
     async with httpx.AsyncClient() as client:
-        for char_id, kill_count in top_pilots:
+        for char_id in ranked:
             try:
                 r = await client.get(
                     f"{ESI_BASE}/characters/{char_id}/",
@@ -287,11 +320,10 @@ async def get_corp_top_pilots(corp_id: int, limit: int = 50) -> list:
                 if r.status_code == 200:
                     char_name = r.json().get("name", "Unknown")
 
-                # Resolve top ship for this pilot
                 top_ship_id = max(
                     pilot_ships[char_id],
                     key=lambda s: list(pilot_ships[char_id]).count(s)
-                ) if pilot_ships[char_id] else None
+                ) if pilot_ships.get(char_id) else None
 
                 ship_name = "Unknown"
                 if top_ship_id:
@@ -302,10 +334,16 @@ async def get_corp_top_pilots(corp_id: int, limit: int = 50) -> list:
                     if r2.status_code == 200:
                         ship_name = r2.json().get("name", "Unknown")
 
+                kills = pilot_kills.get(char_id, 0)
+                losses = pilot_losses.get(char_id, 0)
+                kd = round(kills / losses, 2) if losses > 0 else float(kills)
+
                 results.append({
                     "character_id": char_id,
                     "name": char_name,
-                    "kills_in_sample": kill_count,
+                    "kills_in_sample": kills,
+                    "losses_in_sample": losses,
+                    "kd_ratio": kd,
                     "most_used_ship": ship_name
                 })
             except Exception:
