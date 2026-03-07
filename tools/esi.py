@@ -1,9 +1,17 @@
 import httpx
+import asyncio
+from collections import defaultdict
 
 ESI_BASE = "https://esi.evetech.net/latest"
 
+# Known eviction corps/alliances by ID
+KNOWN_EVICTION_ENTITIES = {
+    # Add known eviction corp IDs here as you encounter them
+    "corps": set(),
+    "alliances": set()
+}
+
 async def get_character_id(name: str) -> int | None:
-    """Look up a character ID by name."""
     url = f"{ESI_BASE}/universe/ids/"
     async with httpx.AsyncClient() as client:
         res = await client.post(url, json=[name])
@@ -14,34 +22,43 @@ async def get_character_id(name: str) -> int | None:
         return characters[0]["id"] if characters else None
 
 async def get_character_info(character_id: int) -> dict:
-    """Get character details by ID."""
     url = f"{ESI_BASE}/characters/{character_id}/"
     async with httpx.AsyncClient() as client:
         res = await client.get(url)
-        if res.status_code != 200:
-            return {}
-        return res.json()
+        return res.json() if res.status_code == 200 else {}
 
 async def get_corporation_info(corp_id: int) -> dict:
-    """Get corporation details by ID."""
     url = f"{ESI_BASE}/corporations/{corp_id}/"
     async with httpx.AsyncClient() as client:
         res = await client.get(url)
-        if res.status_code != 200:
-            return {}
-        return res.json()
+        return res.json() if res.status_code == 200 else {}
 
 async def get_alliance_info(alliance_id: int) -> dict:
-    """Get alliance details by ID."""
     url = f"{ESI_BASE}/alliances/{alliance_id}/"
     async with httpx.AsyncClient() as client:
         res = await client.get(url)
-        if res.status_code != 200:
-            return {}
-        return res.json()
+        return res.json() if res.status_code == 200 else {}
+
+async def resolve_type_names(type_ids: list) -> dict:
+    """Resolve type IDs to names via ESI."""
+    if not type_ids:
+        return {}
+    results = {}
+    async with httpx.AsyncClient() as client:
+        for type_id in type_ids:
+            try:
+                r = await client.get(
+                    f"{ESI_BASE}/universe/types/{type_id}/",
+                    timeout=5.0
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    results[type_id] = data.get("name", f"Unknown [{type_id}]")
+            except Exception:
+                results[type_id] = f"Unknown [{type_id}]"
+    return results
 
 async def get_full_pilot_profile(name: str) -> dict | None:
-    """Get complete pilot profile including corp and alliance."""
     character_id = await get_character_id(name)
     if not character_id:
         return None
@@ -71,7 +88,6 @@ async def get_full_pilot_profile(name: str) -> dict | None:
     }
 
 async def search_corporation(name: str) -> dict | None:
-    """Search for a corporation by name and return full info."""
     url = f"{ESI_BASE}/universe/ids/"
     async with httpx.AsyncClient() as client:
         res = await client.post(url, json=[name])
