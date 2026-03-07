@@ -13,6 +13,7 @@ from tools.dotlan import get_full_system_intel
 from tools.wormhole import get_full_wormhole_intel
 from tools.trader import (appraise_loot, get_market_price, calculate_haul,
                            value_blue_loot, get_fit_cost)
+from tools.combat import get_killmail_from_zkill, parse_eft_fit, compare_fits
 
 load_dotenv()
 
@@ -244,7 +245,44 @@ TOOLS = [
             },
             "required": ["fit_text"]
         }
-    }
+    },
+    {
+        "name": "get_enemy_fit",
+        "description": """Pull the full fit and fight analysis from an enemy killmail.
+        Extracts ship, modules, fight duration estimate, and logi presence.
+        Use when a user provides a zkillboard kill ID or URL.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "kill_id": {
+                    "type": "integer",
+                    "description": "The numeric kill ID from zkillboard"
+                }
+            },
+            "required": ["kill_id"]
+        }
+    },
+    {
+        "name": "analyze_combat",
+        "description": """Compare an enemy killmail fit against the user's own fit.
+        Returns full tactical breakdown including win/loss conditions, range matchup,
+        tackle analysis, neut threat, and FC recommendation. Use when a user wants
+        to know if they can beat an enemy or how to fight them.""",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "kill_id": {
+                    "type": "integer",
+                    "description": "Kill ID of the enemy killmail to analyze"
+                },
+                "your_fit": {
+                    "type": "string",
+                    "description": "Your ship fitting in EFT format"
+                }
+            },
+            "required": ["kill_id", "your_fit"]
+        }
+    },
 ]
 
 
@@ -384,6 +422,30 @@ async def get_fit_cost_tool(fit_text: str) -> str:
         return f"Error calculating fit cost: {str(e)}"
 
 
+async def get_enemy_fit_tool(kill_id: int) -> str:
+    try:
+        result = await get_killmail_from_zkill(kill_id)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error fetching killmail: {str(e)}"
+
+
+async def analyze_combat_tool(kill_id: int, your_fit: str) -> str:
+    try:
+        enemy_fit = await get_killmail_from_zkill(kill_id)
+        if "error" in enemy_fit:
+            return json.dumps(enemy_fit, indent=2)
+        parsed_your_fit = await parse_eft_fit(your_fit)
+        comparison = await compare_fits(enemy_fit, parsed_your_fit)
+        return json.dumps({
+            "enemy_fit": enemy_fit,
+            "your_fit": parsed_your_fit,
+            "comparison": comparison
+        }, indent=2)
+    except Exception as e:
+        return f"Error analyzing combat: {str(e)}"
+
+
 async def process_tool_call(tool_name: str, tool_input: dict) -> str:
     handlers = {
         "get_pilot_intel": lambda: get_pilot_intel(tool_input["pilot_name"]),
@@ -398,6 +460,8 @@ async def process_tool_call(tool_name: str, tool_input: dict) -> str:
         ),
         "value_blue_loot": lambda: value_blue_loot_tool(tool_input["loot_text"]),
         "get_fit_cost": lambda: get_fit_cost_tool(tool_input["fit_text"]),
+        "get_enemy_fit": lambda: get_enemy_fit_tool(tool_input["kill_id"]),
+        "analyze_combat": lambda: analyze_combat_tool(tool_input["kill_id"], tool_input["your_fit"]),
     }
     handler = handlers.get(tool_name)
     if handler:
