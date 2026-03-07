@@ -1,4 +1,5 @@
 import httpx
+from tools.fitting import get_ship_attributes, validate_fit
 
 ESI_BASE = "https://esi.evetech.net/latest"
 FUZZWORK_BASE = "https://market.fuzzwork.co.uk/aggregates"
@@ -83,7 +84,6 @@ async def get_market_price(item_name: str) -> dict:
     """Get current Jita buy/sell price for an item."""
     try:
         async with httpx.AsyncClient() as client:
-            # Resolve name to type_id
             res = await client.post(
                 f"{ESI_BASE}/universe/ids/",
                 json=[item_name],
@@ -100,7 +100,6 @@ async def get_market_price(item_name: str) -> dict:
             type_id = inventory_types[0]["id"]
             resolved_name = inventory_types[0]["name"]
 
-            # Fetch Jita prices from Fuzzwork
             market_res = await client.get(
                 f"{FUZZWORK_BASE}/",
                 params={"station": JITA_STATION_ID, "types": type_id},
@@ -163,17 +162,14 @@ async def value_blue_loot(loot_text: str) -> dict:
         name.lower(): (tid, price)
         for tid, (name, price) in BLUE_LOOT_PRICES.items()
     }
-
     unrecognized = []
 
     for line in lines:
         line = line.strip()
         if not line:
             continue
-
         qty = 1
         name = line
-
         if " x " in line.lower():
             parts = line.rsplit(" x ", 1)
             name = parts[0].strip()
@@ -205,35 +201,73 @@ async def value_blue_loot(loot_text: str) -> dict:
 
 
 async def get_fit_cost(fit_text: str) -> dict:
-    """Estimate Jita cost of an EFT-format fit."""
+    """Estimate Jita cost of an EFT-format fit with validation."""
     lines = fit_text.strip().split("\n")
     items = {}
+    ship_name = "Unknown"
+    high_slots, mid_slots, low_slots, rigs, subsystems = [], [], [], [], []
+    current_section = "high"
+    section_break_count = 0
 
     for line in lines:
         line = line.strip()
-        if not line or line.startswith("//") or line.startswith("#"):
+        if not line:
+            section_break_count += 1
+            if section_break_count == 1:
+                current_section = "mid"
+            elif section_break_count == 2:
+                current_section = "low"
+            elif section_break_count == 3:
+                current_section = "rig"
+            elif section_break_count == 4:
+                current_section = "subsystem"
+            continue
+
+        section_break_count = 0
+
+        if line.startswith("//") or line.startswith("#"):
             continue
         if line.startswith("[") and "," in line:
-            ship = line[1:line.index(",")].strip()
-            items[ship] = items.get(ship, 0) + 1
-        elif line.startswith("["):
+            ship_name = line[1:line.index(",")].strip()
+            items[ship_name] = items.get(ship_name, 0) + 1
             continue
-        else:
-            if " x" in line:
-                parts = line.rsplit(" x", 1)
+        if line.startswith("["):
+            continue
+
+        qty = 1
+        name = line
+        if " x" in line:
+            parts = line.rsplit(" x", 1)
+            try:
+                qty = int(parts[1].strip())
                 name = parts[0].strip()
-                try:
-                    qty = int(parts[1].strip())
-                except ValueError:
-                    qty = 1
-            else:
-                name = line
-                qty = 1
-            if name:
-                items[name] = items.get(name, 0) + qty
+            except ValueError:
+                pass
+
+        if name and name != "Empty":
+            items[name] = items.get(name, 0) + qty
+            entry = {"name": name, "qty": qty, "group": "Unknown", "type_id": None}
+            if current_section == "high":
+                high_slots.append(entry)
+            elif current_section == "mid":
+                mid_slots.append(entry)
+            elif current_section == "low":
+                low_slots.append(entry)
+            elif current_section == "rig":
+                rigs.append(entry)
+            elif current_section == "subsystem":
+                subsystems.append(entry)
 
     if not items:
         return {"error": "Could not parse any items from fit"}
+
+    # Validate fit against ship attributes
+    validation_warnings = []
+    if ship_name != "Unknown":
+        ship_attrs = await get_ship_attributes(ship_name)
+        validation_warnings = validate_fit(
+            ship_attrs, high_slots, mid_slots, low_slots, rigs, subsystems
+        )
 
     all_names = list(items.keys())
     type_ids = {}
@@ -284,9 +318,11 @@ async def get_fit_cost(fit_text: str) -> dict:
             breakdown.sort(key=lambda x: x["total_isk"], reverse=True)
 
             return {
+                "ship": ship_name,
                 "total_fit_cost_isk": round(total),
                 "breakdown": breakdown,
-                "unpriced_items": unpriced
+                "unpriced_items": unpriced,
+                "validation_warnings": validation_warnings
             }
 
     except Exception as e:
