@@ -1,6 +1,6 @@
-import httpx
 import asyncio
 from collections import defaultdict
+from tools.http_client import get, post, zkill_get, batch_gather
 
 ESI_BASE = "https://esi.evetech.net/latest"
 ZKILL_BASE = "https://zkillboard.com/api"
@@ -34,38 +34,33 @@ CAPITAL_TYPE_IDS = {
     22852, 23757, 23911, 24483, 24484, 24690, 28661
 }
 
+
 async def get_wormhole_system_id(system_name: str) -> int | None:
-    url = f"{ESI_BASE}/universe/ids/"
-    async with httpx.AsyncClient() as client:
-        res = await client.post(url, json=[system_name])
-        if res.status_code != 200:
-            return None
-        data = res.json()
-        systems = data.get("systems", [])
-        return systems[0]["id"] if systems else None
+    res = await post(f"{ESI_BASE}/universe/ids/", json=[system_name])
+    if res.status_code != 200:
+        return None
+    systems = res.json().get("systems", [])
+    return systems[0]["id"] if systems else None
 
 async def get_wormhole_system_info(system_id: int) -> dict:
-    url = f"{ESI_BASE}/universe/systems/{system_id}/"
-    async with httpx.AsyncClient() as client:
-        res = await client.get(url)
-        return res.json() if res.status_code == 200 else {}
+    res = await get(f"{ESI_BASE}/universe/systems/{system_id}/")
+    return res.json() if res.status_code == 200 else {}
 
 async def get_wh_class_from_region(system_id: int, system_info: dict) -> str:
     try:
         constellation_id = system_info.get("constellation_id")
         if not constellation_id:
             return "Unknown"
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"{ESI_BASE}/universe/constellations/{constellation_id}/")
-            if r.status_code != 200:
-                return "Unknown"
-            region_id = r.json().get("region_id")
-            if not region_id:
-                return "Unknown"
-            r2 = await client.get(f"{ESI_BASE}/universe/regions/{region_id}/")
-            if r2.status_code != 200:
-                return "Unknown"
-            region_name = r2.json().get("name", "")
+        r = await get(f"{ESI_BASE}/universe/constellations/{constellation_id}/")
+        if r.status_code != 200:
+            return "Unknown"
+        region_id = r.json().get("region_id")
+        if not region_id:
+            return "Unknown"
+        r2 = await get(f"{ESI_BASE}/universe/regions/{region_id}/")
+        if r2.status_code != 200:
+            return "Unknown"
+        region_name = r2.json().get("name", "")
         class_map = {
             "A": "C1", "B": "C2", "C": "C3", "D": "C4",
             "E": "C5", "F": "C6", "G": "C13", "H": "Thera",
@@ -76,72 +71,77 @@ async def get_wh_class_from_region(system_id: int, system_info: dict) -> str:
     except Exception:
         return "Unknown"
 
-async def get_wormhole_kills(system_id: int, limit: int = 50) -> list:
-    url = f"{ZKILL_BASE}/kills/solarSystemID/{system_id}/"
-    async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
-        try:
-            res = await client.get(url, timeout=10.0)
-            if res.status_code != 200:
-                return []
-            zkill_data = res.json()[:limit]
-        except Exception:
-            return []
 
-    full_kills = []
-    async with httpx.AsyncClient() as client:
-        for kill in zkill_data:
-            try:
-                kill_id = kill.get("killmail_id")
-                kill_hash = kill.get("zkb", {}).get("hash")
-                if not kill_id or not kill_hash:
-                    continue
-                r = await client.get(
-                    f"{ESI_BASE}/killmails/{kill_id}/{kill_hash}/",
-                    timeout=5.0
-                )
-                if r.status_code == 200:
-                    full_kill = r.json()
-                    full_kill["zkb"] = kill.get("zkb", {})
-                    full_kills.append(full_kill)
-            except Exception:
-                continue
-    return full_kills
+async def _fetch_wh_killmail(kill: dict) -> dict | None:
+    """Fetch a single wormhole killmail from ESI."""
+    kill_id = kill.get("killmail_id")
+    kill_hash = kill.get("zkb", {}).get("hash")
+    if not kill_id or not kill_hash:
+        return None
+    try:
+        r = await get(f"{ESI_BASE}/killmails/{kill_id}/{kill_hash}/", timeout=5.0)
+        if r.status_code == 200:
+            full_kill = r.json()
+            full_kill["zkb"] = kill.get("zkb", {})
+            return full_kill
+    except Exception:
+        pass
+    return None
+
+
+async def get_wormhole_kills(system_id: int, limit: int = 50) -> list:
+    try:
+        res = await zkill_get(f"{ZKILL_BASE}/kills/solarSystemID/{system_id}/", timeout=10.0)
+        if res.status_code != 200:
+            return []
+        zkill_data = res.json()[:limit]
+    except Exception:
+        return []
+
+    coros = [_fetch_wh_killmail(kill) for kill in zkill_data]
+    results = await batch_gather(coros, batch_size=15)
+    return [r for r in results if r and not isinstance(r, Exception)]
+
 
 async def get_zkill_system_stats(system_id: int) -> dict:
-    url = f"{ZKILL_BASE}/stats/solarSystemID/{system_id}/"
-    async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
-        try:
-            res = await client.get(url, timeout=10.0)
-            return res.json() if res.status_code == 200 else {}
-        except Exception:
-            return {}
+    try:
+        res = await zkill_get(f"{ZKILL_BASE}/stats/solarSystemID/{system_id}/", timeout=10.0)
+        return res.json() if res.status_code == 200 else {}
+    except Exception:
+        return {}
+
+
+async def _fetch_corp_with_alliance(corp_id: int) -> dict | None:
+    """Fetch corp info and resolve alliance name."""
+    try:
+        r = await get(f"{ESI_BASE}/corporations/{corp_id}/", timeout=5.0)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        alliance_name = "No Alliance"
+        alliance_id = data.get("alliance_id")
+        if alliance_id:
+            r2 = await get(f"{ESI_BASE}/alliances/{alliance_id}/", timeout=5.0)
+            if r2.status_code == 200:
+                alliance_name = r2.json().get("name", "No Alliance")
+        return {
+            "corp_id": corp_id,
+            "name": data.get("name", "Unknown"),
+            "ticker": data.get("ticker", ""),
+            "members": data.get("member_count", 0),
+            "alliance": alliance_name
+        }
+    except Exception:
+        return None
+
 
 async def resolve_corp_names(corp_ids: list) -> list:
     if not corp_ids:
         return []
-    corp_names = []
-    async with httpx.AsyncClient() as client:
-        for corp_id in corp_ids:
-            try:
-                r = await client.get(f"{ESI_BASE}/corporations/{corp_id}/", timeout=5.0)
-                if r.status_code == 200:
-                    data = r.json()
-                    alliance_name = "No Alliance"
-                    alliance_id = data.get("alliance_id")
-                    if alliance_id:
-                        r2 = await client.get(f"{ESI_BASE}/alliances/{alliance_id}/", timeout=5.0)
-                        if r2.status_code == 200:
-                            alliance_name = r2.json().get("name", "No Alliance")
-                    corp_names.append({
-                        "corp_id": corp_id,
-                        "name": data.get("name", "Unknown"),
-                        "ticker": data.get("ticker", ""),
-                        "members": data.get("member_count", 0),
-                        "alliance": alliance_name
-                    })
-            except Exception:
-                continue
-    return corp_names
+    coros = [_fetch_corp_with_alliance(corp_id) for corp_id in corp_ids]
+    results = await batch_gather(coros, batch_size=15)
+    return [r for r in results if r and not isinstance(r, Exception)]
+
 
 def analyze_wh_kills(kills: list) -> dict:
     if not kills:
@@ -156,7 +156,6 @@ def analyze_wh_kills(kills: list) -> dict:
             "dominant_timezone": "Unknown"
         }
 
-    # Track which days each corp was active as an ATTACKER
     corp_days = defaultdict(set)
     corp_kill_count = defaultdict(int)
     capital_seen = False
@@ -164,11 +163,9 @@ def analyze_wh_kills(kills: list) -> dict:
     timezones = defaultdict(int)
 
     for kill in kills:
-        # Get the date portion of killmail_time
         kill_time = kill.get("killmail_time", "")
-        kill_date = kill_time[:10]  # e.g. "2026-03-06"
+        kill_date = kill_time[:10]
 
-        # Process attackers
         for attacker in kill.get("attackers", []):
             corp_id = attacker.get("corporation_id")
             if corp_id and corp_id not in EXCLUDED_CORPS:
@@ -178,17 +175,14 @@ def analyze_wh_kills(kills: list) -> dict:
             if ship_id in CAPITAL_TYPE_IDS:
                 capital_seen = True
 
-        # Farming detection
         if any(a.get("faction_id") for a in kill.get("attackers", [])):
             farming_kills += 1
 
-        # Timezone from zkb labels
         for label in kill.get("zkb", {}).get("labels", []):
             if label.startswith("tz:"):
                 tz = label.replace("tz:", "").upper()
                 timezones[tz] += 1
 
-    # Residents = active as attacker on 2+ unique days
     resident_corps = {
         corp_id: corp_kill_count[corp_id]
         for corp_id, days in corp_days.items()
@@ -224,6 +218,7 @@ def analyze_wh_kills(kills: list) -> dict:
         "farming_kill_count": farming_kills,
         "dominant_timezone": dominant_tz
     }
+
 
 async def get_full_wormhole_intel(system_name: str) -> dict | None:
     system_id = await get_wormhole_system_id(system_name)

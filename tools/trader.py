@@ -1,4 +1,4 @@
-import httpx
+from tools.http_client import get, post, get_client
 from tools.fitting import get_ship_attributes, validate_fit
 
 ESI_BASE = "https://esi.evetech.net/latest"
@@ -42,40 +42,40 @@ SALES_TAX = 0.036
 async def appraise_loot(loot_text: str) -> dict:
     """Appraise a loot list using Janice API."""
     try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                f"{JANICE_BASE}/appraisal",
-                params={"designation": "appraisal", "pricing": "split"},
-                headers={
-                    "X-ApiKey": "janice",
-                    "Content-Type": "text/plain",
-                    "Accept": "application/json"
-                },
-                content=loot_text.encode(),
-                timeout=15.0
-            )
-            if res.status_code != 200:
-                return {"error": f"Janice API returned {res.status_code}"}
+        client = get_client()
+        res = await client.post(
+            f"{JANICE_BASE}/appraisal",
+            params={"designation": "appraisal", "pricing": "split"},
+            headers={
+                "X-ApiKey": "janice",
+                "Content-Type": "text/plain",
+                "Accept": "application/json"
+            },
+            content=loot_text.encode(),
+            timeout=15.0
+        )
+        if res.status_code != 200:
+            return {"error": f"Janice API returned {res.status_code}"}
 
-            data = res.json()
-            items = data.get("items", [])
-            parsed_items = []
-            for item in items[:20]:
-                parsed_items.append({
-                    "name": item.get("itemType", {}).get("name", "Unknown"),
-                    "quantity": item.get("amount", 0),
-                    "buy": item.get("buyPrice", 0),
-                    "sell": item.get("sellPrice", 0),
-                })
+        data = res.json()
+        items = data.get("items", [])
+        parsed_items = []
+        for item in items[:20]:
+            parsed_items.append({
+                "name": item.get("itemType", {}).get("name", "Unknown"),
+                "quantity": item.get("amount", 0),
+                "buy": item.get("buyPrice", 0),
+                "sell": item.get("sellPrice", 0),
+            })
 
-            return {
-                "total_buy_isk": data.get("totalBuyPrice", 0),
-                "total_sell_isk": data.get("totalSellPrice", 0),
-                "total_split_isk": data.get("totalSplitPrice", 0),
-                "item_count": len(items),
-                "items": parsed_items,
-                "janice_link": data.get("appraisalLink", "")
-            }
+        return {
+            "total_buy_isk": data.get("totalBuyPrice", 0),
+            "total_sell_isk": data.get("totalSellPrice", 0),
+            "total_split_isk": data.get("totalSplitPrice", 0),
+            "item_count": len(items),
+            "items": parsed_items,
+            "janice_link": data.get("appraisalLink", "")
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -83,49 +83,44 @@ async def appraise_loot(loot_text: str) -> dict:
 async def get_market_price(item_name: str) -> dict:
     """Get current Jita buy/sell price for an item."""
     try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                f"{ESI_BASE}/universe/ids/",
-                json=[item_name],
-                timeout=10.0
-            )
-            if res.status_code != 200:
-                return {"error": "Could not resolve item name"}
+        res = await post(f"{ESI_BASE}/universe/ids/", json=[item_name], timeout=10.0)
+        if res.status_code != 200:
+            return {"error": "Could not resolve item name"}
 
-            data = res.json()
-            inventory_types = data.get("inventory_types", [])
-            if not inventory_types:
-                return {"error": f"No item found with name '{item_name}'"}
+        data = res.json()
+        inventory_types = data.get("inventory_types", [])
+        if not inventory_types:
+            return {"error": f"No item found with name '{item_name}'"}
 
-            type_id = inventory_types[0]["id"]
-            resolved_name = inventory_types[0]["name"]
+        type_id = inventory_types[0]["id"]
+        resolved_name = inventory_types[0]["name"]
 
-            market_res = await client.get(
-                f"{FUZZWORK_BASE}/",
-                params={"station": JITA_STATION_ID, "types": type_id},
-                timeout=10.0
-            )
-            if market_res.status_code != 200:
-                return {"error": "Could not fetch market data"}
+        market_res = await get(
+            f"{FUZZWORK_BASE}/",
+            params={"station": JITA_STATION_ID, "types": type_id},
+            timeout=10.0
+        )
+        if market_res.status_code != 200:
+            return {"error": "Could not fetch market data"}
 
-            market_data = market_res.json().get(str(type_id), {})
-            buy = market_data.get("buy", {})
-            sell = market_data.get("sell", {})
+        market_data = market_res.json().get(str(type_id), {})
+        buy = market_data.get("buy", {})
+        sell = market_data.get("sell", {})
 
-            jita_buy = float(buy.get("max", 0) or 0)
-            jita_sell = float(sell.get("min", 0) or 0)
+        jita_buy = float(buy.get("max", 0) or 0)
+        jita_sell = float(sell.get("min", 0) or 0)
 
-            return {
-                "item": resolved_name,
-                "type_id": type_id,
-                "jita_buy": jita_buy,
-                "jita_sell": jita_sell,
-                "buy_volume": int(float(buy.get("volume", 0) or 0)),
-                "sell_volume": int(float(sell.get("volume", 0) or 0)),
-                "spread_pct": round(
-                    ((jita_sell - jita_buy) / jita_sell) * 100, 2
-                ) if jita_sell > 0 else 0
-            }
+        return {
+            "item": resolved_name,
+            "type_id": type_id,
+            "jita_buy": jita_buy,
+            "jita_sell": jita_sell,
+            "buy_volume": int(float(buy.get("volume", 0) or 0)),
+            "sell_volume": int(float(sell.get("volume", 0) or 0)),
+            "spread_pct": round(
+                ((jita_sell - jita_buy) / jita_sell) * 100, 2
+            ) if jita_sell > 0 else 0
+        }
     except Exception as e:
         return {"error": str(e)}
 
@@ -261,7 +256,6 @@ async def get_fit_cost(fit_text: str) -> dict:
     if not items:
         return {"error": "Could not parse any items from fit"}
 
-    # Validate fit against ship attributes
     validation_warnings = []
     if ship_name != "Unknown":
         ship_attrs = await get_ship_attributes(ship_name)
@@ -273,57 +267,51 @@ async def get_fit_cost(fit_text: str) -> dict:
     type_ids = {}
 
     try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                f"{ESI_BASE}/universe/ids/",
-                json=all_names,
-                timeout=10.0
-            )
-            if res.status_code == 200:
-                data = res.json()
-                for entry in data.get("inventory_types", []):
-                    type_ids[entry["name"].lower()] = entry["id"]
+        res = await post(f"{ESI_BASE}/universe/ids/", json=all_names, timeout=10.0)
+        if res.status_code == 200:
+            for entry in res.json().get("inventory_types", []):
+                type_ids[entry["name"].lower()] = entry["id"]
 
-            id_list = list(type_ids.values())
-            if not id_list:
-                return {"error": "Could not resolve any item names to type IDs"}
+        id_list = list(type_ids.values())
+        if not id_list:
+            return {"error": "Could not resolve any item names to type IDs"}
 
-            market_res = await client.get(
-                f"{FUZZWORK_BASE}/",
-                params={"station": JITA_STATION_ID, "types": ",".join(map(str, id_list))},
-                timeout=10.0
-            )
-            market_data = market_res.json() if market_res.status_code == 200 else {}
+        market_res = await get(
+            f"{FUZZWORK_BASE}/",
+            params={"station": JITA_STATION_ID, "types": ",".join(map(str, id_list))},
+            timeout=10.0
+        )
+        market_data = market_res.json() if market_res.status_code == 200 else {}
 
-            breakdown = []
-            total = 0
-            unpriced = []
+        breakdown = []
+        total = 0
+        unpriced = []
 
-            for name, qty in items.items():
-                tid = type_ids.get(name.lower())
-                if not tid:
-                    unpriced.append(name)
-                    continue
-                mdata = market_data.get(str(tid), {})
-                sell_min = float(mdata.get("sell", {}).get("min", 0) or 0)
-                item_total = sell_min * qty
-                total += item_total
-                breakdown.append({
-                    "name": name,
-                    "quantity": qty,
-                    "unit_price_isk": sell_min,
-                    "total_isk": item_total
-                })
+        for name, qty in items.items():
+            tid = type_ids.get(name.lower())
+            if not tid:
+                unpriced.append(name)
+                continue
+            mdata = market_data.get(str(tid), {})
+            sell_min = float(mdata.get("sell", {}).get("min", 0) or 0)
+            item_total = sell_min * qty
+            total += item_total
+            breakdown.append({
+                "name": name,
+                "quantity": qty,
+                "unit_price_isk": sell_min,
+                "total_isk": item_total
+            })
 
-            breakdown.sort(key=lambda x: x["total_isk"], reverse=True)
+        breakdown.sort(key=lambda x: x["total_isk"], reverse=True)
 
-            return {
-                "ship": ship_name,
-                "total_fit_cost_isk": round(total),
-                "breakdown": breakdown,
-                "unpriced_items": unpriced,
-                "validation_warnings": validation_warnings
-            }
+        return {
+            "ship": ship_name,
+            "total_fit_cost_isk": round(total),
+            "breakdown": breakdown,
+            "unpriced_items": unpriced,
+            "validation_warnings": validation_warnings
+        }
 
     except Exception as e:
         return {"error": str(e)}

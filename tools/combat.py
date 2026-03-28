@@ -1,5 +1,5 @@
-import httpx
 import re
+from tools.http_client import get, zkill_get, batch_gather
 
 ESI_BASE = "https://esi.evetech.net/latest"
 ZKILL_BASE = "https://zkillboard.com/api"
@@ -40,42 +40,52 @@ LOGI_TYPE_IDS = {
 LOGI_GROUP_IDS = {832}  # Logistics group
 
 
+async def _fetch_type_bulk(type_id: int) -> tuple[int, dict]:
+    """Fetch a single type's name and group info from ESI."""
+    try:
+        r = await get(f"{ESI_BASE}/universe/types/{type_id}/", timeout=5.0)
+        if r.status_code == 200:
+            data = r.json()
+            return type_id, {
+                "name": data.get("name", f"Unknown[{type_id}]"),
+                "group_id": data.get("group_id"),
+                "description": data.get("description", "")
+            }
+    except Exception:
+        pass
+    return type_id, {"name": f"Unknown[{type_id}]", "group_id": None}
+
+
 async def resolve_type_names_bulk(type_ids: list) -> dict:
-    """Resolve multiple type IDs to names and group info."""
-    results = {}
-    async with httpx.AsyncClient() as client:
-        for type_id in type_ids:
-            try:
-                r = await client.get(
-                    f"{ESI_BASE}/universe/types/{type_id}/",
-                    timeout=5.0
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    results[type_id] = {
-                        "name": data.get("name", f"Unknown[{type_id}]"),
-                        "group_id": data.get("group_id"),
-                        "description": data.get("description", "")
-                    }
-            except Exception:
-                results[type_id] = {"name": f"Unknown[{type_id}]", "group_id": None}
-    return results
+    """Resolve multiple type IDs to names and group info — concurrent batched requests."""
+    if not type_ids:
+        return {}
+    coros = [_fetch_type_bulk(tid) for tid in type_ids]
+    results = await batch_gather(coros, batch_size=15)
+    return {
+        tid: info
+        for item in results
+        if not isinstance(item, Exception)
+        for tid, info in [item]
+    }
+
+
+async def _fetch_group_name(group_id: int) -> tuple[int, str]:
+    """Fetch group name — returns (group_id, name) for use with batch_gather."""
+    name = await get_group_name(group_id)
+    return group_id, name
 
 
 async def get_group_name(group_id: int) -> str:
     """Get group name from group ID."""
     if not group_id:
         return "Unknown"
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(
-                f"{ESI_BASE}/universe/groups/{group_id}/",
-                timeout=5.0
-            )
-            if r.status_code == 200:
-                return r.json().get("name", "Unknown")
-        except Exception:
-            pass
+    try:
+        r = await get(f"{ESI_BASE}/universe/groups/{group_id}/", timeout=5.0)
+        if r.status_code == 200:
+            return r.json().get("name", "Unknown")
+    except Exception:
+        pass
     return "Unknown"
 
 
@@ -83,24 +93,17 @@ async def get_ship_class(ship_type_id: int) -> str:
     """Get ship class/group name for a ship type ID."""
     if not ship_type_id:
         return "Unknown"
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(
-                f"{ESI_BASE}/universe/types/{ship_type_id}/",
-                timeout=5.0
-            )
-            if r.status_code != 200:
-                return "Unknown"
-            group_id = r.json().get("group_id")
-            if group_id:
-                gr = await client.get(
-                    f"{ESI_BASE}/universe/groups/{group_id}/",
-                    timeout=5.0
-                )
-                if gr.status_code == 200:
-                    return gr.json().get("name", "Unknown")
-        except Exception:
-            pass
+    try:
+        r = await get(f"{ESI_BASE}/universe/types/{ship_type_id}/", timeout=5.0)
+        if r.status_code != 200:
+            return "Unknown"
+        group_id = r.json().get("group_id")
+        if group_id:
+            gr = await get(f"{ESI_BASE}/universe/groups/{group_id}/", timeout=5.0)
+            if gr.status_code == 200:
+                return gr.json().get("name", "Unknown")
+    except Exception:
+        pass
     return "Unknown"
 
 
@@ -184,145 +187,138 @@ def estimate_fight_duration(
 
 async def extract_fit_from_killmail(kill_id: int, kill_hash: str) -> dict:
     """Extract full fit and fight analysis from a killmail."""
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(
-                f"{ESI_BASE}/killmails/{kill_id}/{kill_hash}/",
-                timeout=10.0
-            )
-            if r.status_code != 200:
-                return {"error": f"Could not fetch killmail {kill_id}"}
+    try:
+        r = await get(f"{ESI_BASE}/killmails/{kill_id}/{kill_hash}/", timeout=10.0)
+        if r.status_code != 200:
+            return {"error": f"Could not fetch killmail {kill_id}"}
 
-            km = r.json()
-            victim = km.get("victim", {})
-            attackers = km.get("attackers", [])
-            ship_type_id = victim.get("ship_type_id")
-            items = victim.get("items", [])
-            total_damage = victim.get("damage_taken", 0)
+        km = r.json()
+        victim = km.get("victim", {})
+        attackers = km.get("attackers", [])
+        ship_type_id = victim.get("ship_type_id")
+        items = victim.get("items", [])
+        total_damage = victim.get("damage_taken", 0)
 
-            # Resolve ship name and class
-            ship_name = "Unknown"
-            ship_class = "Unknown"
-            if ship_type_id:
-                sr = await client.get(
-                    f"{ESI_BASE}/universe/types/{ship_type_id}/",
-                    timeout=5.0
-                )
-                if sr.status_code == 200:
-                    ship_data = sr.json()
-                    ship_name = ship_data.get("name", "Unknown")
-                    group_id = ship_data.get("group_id")
-                    if group_id:
-                        gr = await client.get(
-                            f"{ESI_BASE}/universe/groups/{group_id}/",
-                            timeout=5.0
-                        )
-                        if gr.status_code == 200:
-                            ship_class = gr.json().get("name", "Unknown")
+        # Resolve ship name and class
+        ship_name = "Unknown"
+        ship_class = "Unknown"
+        if ship_type_id:
+            sr = await get(f"{ESI_BASE}/universe/types/{ship_type_id}/", timeout=5.0)
+            if sr.status_code == 200:
+                ship_data = sr.json()
+                ship_name = ship_data.get("name", "Unknown")
+                group_id = ship_data.get("group_id")
+                if group_id:
+                    gr = await get(f"{ESI_BASE}/universe/groups/{group_id}/", timeout=5.0)
+                    if gr.status_code == 200:
+                        ship_class = gr.json().get("name", "Unknown")
 
-            # Collect all module type IDs
-            module_ids = [item.get("item_type_id") for item in items if item.get("item_type_id")]
-            unique_ids = list(set(module_ids))
-            type_data = await resolve_type_names_bulk(unique_ids)
+        # Collect all module type IDs — resolve concurrently
+        module_ids = [item.get("item_type_id") for item in items if item.get("item_type_id")]
+        unique_ids = list(set(module_ids))
+        type_data = await resolve_type_names_bulk(unique_ids)
 
-            # Resolve group names
-            group_ids = list(set(
-                v["group_id"] for v in type_data.values() if v.get("group_id")
-            ))
-            group_names = {}
-            for gid in group_ids:
-                group_names[gid] = await get_group_name(gid)
+        # Resolve group names concurrently
+        group_ids = list(set(
+            v["group_id"] for v in type_data.values() if v.get("group_id")
+        ))
+        group_results = await batch_gather(
+            [_fetch_group_name(gid) for gid in group_ids],
+            batch_size=15
+        )
+        group_names = {
+            gid: name
+            for item in group_results
+            if not isinstance(item, Exception)
+            for gid, name in [item]
+        }
 
-            # Classify modules by slot flag
-            high_slots, mid_slots, low_slots, rigs, subsystems, drones = [], [], [], [], [], []
+        # Classify modules by slot flag
+        high_slots, mid_slots, low_slots, rigs, subsystems, drones = [], [], [], [], [], []
 
-            for item in items:
-                type_id = item.get("item_type_id")
-                flag = item.get("flag", 0)
-                qty = item.get("quantity_destroyed", 0) + item.get("quantity_dropped", 0)
-                if qty == 0:
-                    qty = 1
+        for item in items:
+            type_id = item.get("item_type_id")
+            flag = item.get("flag", 0)
+            qty = item.get("quantity_destroyed", 0) + item.get("quantity_dropped", 0)
+            if qty == 0:
+                qty = 1
 
-                info = type_data.get(type_id, {})
-                name = info.get("name", f"Unknown[{type_id}]")
-                group_id = info.get("group_id")
-                group = group_names.get(group_id, "Unknown")
-                entry = {"name": name, "qty": qty, "group": group, "type_id": type_id}
+            info = type_data.get(type_id, {})
+            name = info.get("name", f"Unknown[{type_id}]")
+            group_id = info.get("group_id")
+            group = group_names.get(group_id, "Unknown")
+            entry = {"name": name, "qty": qty, "group": group, "type_id": type_id}
 
-                if 27 <= flag <= 34:
-                    high_slots.append(entry)
-                elif 19 <= flag <= 26:
-                    mid_slots.append(entry)
-                elif 11 <= flag <= 18:
-                    low_slots.append(entry)
-                elif 92 <= flag <= 99:
-                    rigs.append(entry)
-                elif 125 <= flag <= 132:
-                    subsystems.append(entry)
-                elif flag in (87, 88, 89):
-                    drones.append(entry)
+            if 27 <= flag <= 34:
+                high_slots.append(entry)
+            elif 19 <= flag <= 26:
+                mid_slots.append(entry)
+            elif 11 <= flag <= 18:
+                low_slots.append(entry)
+            elif 92 <= flag <= 99:
+                rigs.append(entry)
+            elif 125 <= flag <= 132:
+                subsystems.append(entry)
+            elif flag in (87, 88, 89):
+                drones.append(entry)
 
-            # Analyze fit
-            fit_analysis = analyze_fit_modules(
-                high_slots, mid_slots, low_slots, rigs, subsystems, ship_name
-            )
+        fit_analysis = analyze_fit_modules(
+            high_slots, mid_slots, low_slots, rigs, subsystems, ship_name
+        )
 
-            # Fight duration analysis
-            attacker_count = len(attackers)
-            damage_distribution = {
-                str(a.get("character_id", i)): a.get("damage_done", 0)
-                for i, a in enumerate(attackers)
-            }
+        attacker_count = len(attackers)
+        damage_distribution = {
+            str(a.get("character_id", i)): a.get("damage_done", 0)
+            for i, a in enumerate(attackers)
+        }
 
-            # Check for logi in attackers
+        # Check for logi in attackers
+        logi_present = any(
+            a.get("ship_type_id") in LOGI_TYPE_IDS
+            for a in attackers
+        )
+
+        if not logi_present:
+            attacker_ship_ids = [a.get("ship_type_id") for a in attackers if a.get("ship_type_id")]
+            attacker_type_data = await resolve_type_names_bulk(attacker_ship_ids[:20])
             logi_present = any(
-                a.get("ship_type_id") in LOGI_TYPE_IDS
-                for a in attackers
+                v.get("group_id") in LOGI_GROUP_IDS
+                for v in attacker_type_data.values()
             )
 
-            # Also check attacker ship classes
-            if not logi_present:
-                attacker_ship_ids = [a.get("ship_type_id") for a in attackers if a.get("ship_type_id")]
-                attacker_type_data = await resolve_type_names_bulk(attacker_ship_ids[:20])
-                logi_present = any(
-                    v.get("group_id") in LOGI_GROUP_IDS
-                    for v in attacker_type_data.values()
-                )
+        fight_duration = estimate_fight_duration(
+            total_damage=total_damage,
+            ship_class=ship_class,
+            attacker_count=attacker_count,
+            logi_present=logi_present,
+            damage_distribution=damage_distribution
+        )
 
-            fight_duration = estimate_fight_duration(
-                total_damage=total_damage,
-                ship_class=ship_class,
-                attacker_count=attacker_count,
-                logi_present=logi_present,
-                damage_distribution=damage_distribution
-            )
+        top_attackers = sorted(
+            attackers, key=lambda a: a.get("damage_done", 0), reverse=True
+        )[:5]
 
-            # Top attackers
-            top_attackers = sorted(
-                attackers, key=lambda a: a.get("damage_done", 0), reverse=True
-            )[:5]
+        return {
+            "kill_id": kill_id,
+            "killmail_time": km.get("killmail_time", ""),
+            "ship": ship_name,
+            "ship_class": ship_class,
+            "ship_type_id": ship_type_id,
+            "pilot_id": victim.get("character_id"),
+            "corp_id": victim.get("corporation_id"),
+            "high_slots": high_slots,
+            "mid_slots": mid_slots,
+            "low_slots": low_slots,
+            "rigs": rigs,
+            "subsystems": subsystems,
+            "drones": drones,
+            "fit_analysis": fit_analysis,
+            "fight_duration": fight_duration,
+            "top_attackers": top_attackers
+        }
 
-            return {
-                "kill_id": kill_id,
-                "killmail_time": km.get("killmail_time", ""),
-                "ship": ship_name,
-                "ship_class": ship_class,
-                "ship_type_id": ship_type_id,
-                "pilot_id": victim.get("character_id"),
-                "corp_id": victim.get("corporation_id"),
-                "high_slots": high_slots,
-                "mid_slots": mid_slots,
-                "low_slots": low_slots,
-                "rigs": rigs,
-                "subsystems": subsystems,
-                "drones": drones,
-                "fit_analysis": fit_analysis,
-                "fight_duration": fight_duration,
-                "top_attackers": top_attackers
-            }
-
-        except Exception as e:
-            return {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def analyze_fit_modules(high, mid, low, rigs, subsystems, ship_name) -> dict:
@@ -411,27 +407,23 @@ def analyze_fit_modules(high, mid, low, rigs, subsystems, ship_name) -> dict:
 
 async def get_killmail_from_zkill(kill_id: int) -> dict:
     """Fetch killmail hash from zKillboard then full data from ESI."""
-    async with httpx.AsyncClient(headers={"User-Agent": "AURA-EVE-Agent/1.0"}) as client:
-        try:
-            r = await client.get(
-                f"{ZKILL_BASE}/killID/{kill_id}/",
-                timeout=10.0
-            )
-            if r.status_code != 200:
-                return {"error": f"zKillboard returned {r.status_code}"}
+    try:
+        r = await zkill_get(f"{ZKILL_BASE}/killID/{kill_id}/", timeout=10.0)
+        if r.status_code != 200:
+            return {"error": f"zKillboard returned {r.status_code}"}
 
-            data = r.json()
-            if not data:
-                return {"error": f"No killmail found with ID {kill_id}"}
+        data = r.json()
+        if not data:
+            return {"error": f"No killmail found with ID {kill_id}"}
 
-            kill_hash = data[0].get("zkb", {}).get("hash")
-            if not kill_hash:
-                return {"error": "Could not get killmail hash"}
+        kill_hash = data[0].get("zkb", {}).get("hash")
+        if not kill_hash:
+            return {"error": "Could not get killmail hash"}
 
-            return await extract_fit_from_killmail(kill_id, kill_hash)
+        return await extract_fit_from_killmail(kill_id, kill_hash)
 
-        except Exception as e:
-            return {"error": str(e)}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 async def parse_eft_fit(fit_text: str) -> dict:

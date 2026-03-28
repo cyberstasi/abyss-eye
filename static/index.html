@@ -706,6 +706,9 @@
 </footer>
 
 <script>
+// ── SESSION ID ── generated once per page load, persists for the tab lifetime
+const SESSION_ID = 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 // ── CAPABILITIES DATA ──
 const CAPABILITIES = [
     {
@@ -1010,7 +1013,7 @@ async function sendMessage() {
         const res = await fetch('/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify({ message: text, session_id: SESSION_ID })
         });
         const data = await res.json();
         removeThinking();

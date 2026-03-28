@@ -1,7 +1,8 @@
 import os
 import json
 import asyncio
-from anthropic import Anthropic
+import time
+from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from tools.esi import get_full_pilot_profile, search_corporation
 from tools.zkill import (get_pilot_kills, get_pilot_losses,
@@ -17,7 +18,7 @@ from tools.combat import get_killmail_from_zkill, parse_eft_fit, compare_fits
 
 load_dotenv()
 
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 EVE_SYSTEM_PROMPT = """You are AURA, an elite EVE Online AI assistant built for a wormhole corporation.
 
@@ -469,19 +470,59 @@ async def process_tool_call(tool_name: str, tool_input: dict) -> str:
     return f"Unknown tool: {tool_name}"
 
 
-conversation_history = []
+# Per-session conversation history.
+# Key: session_id (str), Value: {"history": [...], "last_active": float}
+_sessions: dict[str, dict] = {}
+
+# Maximum message pairs (user + assistant) kept per session.
+# Each "pair" = 1 user message + 1 assistant message = 2 entries.
+SESSION_MAX_PAIRS = 20
+# Sessions idle longer than this (seconds) are pruned on the next request.
+SESSION_TTL = 3600  # 1 hour
 
 
-async def chat_async(user_message: str) -> str:
-    conversation_history.append({"role": "user", "content": user_message})
+def _get_history(session_id: str) -> list:
+    """Return the history list for a session, creating it if needed."""
+    now = time.time()
+    if session_id not in _sessions:
+        _sessions[session_id] = {"history": [], "last_active": now}
+    _sessions[session_id]["last_active"] = now
+    return _sessions[session_id]["history"]
+
+
+def _trim_history(history: list) -> None:
+    """Drop the oldest pairs when we exceed SESSION_MAX_PAIRS."""
+    # Each pair = 2 entries (user + assistant). Tool call turns add extra
+    # entries but we only count the outermost user/assistant boundary.
+    # Simple approach: count total entries and drop from the front in pairs.
+    max_entries = SESSION_MAX_PAIRS * 2
+    while len(history) > max_entries:
+        # Drop the first two entries (oldest user + assistant pair)
+        history.pop(0)
+        if history:
+            history.pop(0)
+
+
+def _prune_stale_sessions() -> None:
+    """Remove sessions that have been idle longer than SESSION_TTL."""
+    cutoff = time.time() - SESSION_TTL
+    stale = [sid for sid, s in _sessions.items() if s["last_active"] < cutoff]
+    for sid in stale:
+        del _sessions[sid]
+
+
+async def chat_async(user_message: str, session_id: str = "default") -> str:
+    _prune_stale_sessions()
+    history = _get_history(session_id)
+    history.append({"role": "user", "content": user_message})
 
     while True:
-        response = client.messages.create(
+        response = await client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=8096,
             system=EVE_SYSTEM_PROMPT,
             tools=TOOLS,
-            messages=conversation_history
+            messages=history
         )
 
         if response.stop_reason == "tool_use":
@@ -495,15 +536,16 @@ async def chat_async(user_message: str) -> str:
                         "tool_use_id": block.id,
                         "content": result
                     })
-            conversation_history.append({"role": "assistant", "content": response.content})
-            conversation_history.append({"role": "user", "content": tool_results})
+            history.append({"role": "assistant", "content": response.content})
+            history.append({"role": "user", "content": tool_results})
 
         else:
             final_text = ""
             for block in response.content:
                 if hasattr(block, "text"):
                     final_text += block.text
-            conversation_history.append({"role": "assistant", "content": final_text})
+            history.append({"role": "assistant", "content": final_text})
+            _trim_history(history)
             return final_text
 
 
