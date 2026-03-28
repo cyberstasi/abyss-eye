@@ -491,16 +491,23 @@ def _get_history(session_id: str) -> list:
 
 
 def _trim_history(history: list) -> None:
-    """Drop the oldest pairs when we exceed SESSION_MAX_PAIRS."""
-    # Each pair = 2 entries (user + assistant). Tool call turns add extra
-    # entries but we only count the outermost user/assistant boundary.
-    # Simple approach: count total entries and drop from the front in pairs.
+    """Drop oldest entries when history exceeds SESSION_MAX_PAIRS pairs.
+
+    Tool-call exchanges produce more than 2 entries (user → assistant tool_use
+    → user tool_result → assistant text), so we can't safely pop a fixed count.
+    After trimming we advance past any orphaned assistant/tool_result entries
+    until the history starts with a clean user string message — the only valid
+    starting point the Anthropic API accepts.
+    """
     max_entries = SESSION_MAX_PAIRS * 2
     while len(history) > max_entries:
-        # Drop the first two entries (oldest user + assistant pair)
         history.pop(0)
-        if history:
-            history.pop(0)
+    # Ensure we start on a proper user message (not mid tool-call sequence).
+    while history and not (
+        history[0]["role"] == "user"
+        and isinstance(history[0]["content"], str)
+    ):
+        history.pop(0)
 
 
 def _prune_stale_sessions() -> None:

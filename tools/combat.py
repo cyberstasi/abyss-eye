@@ -1,4 +1,3 @@
-import re
 from tools.http_client import get, zkill_get, batch_gather
 
 ESI_BASE = "https://esi.evetech.net/latest"
@@ -428,7 +427,7 @@ async def get_killmail_from_zkill(kill_id: int) -> dict:
 
 async def parse_eft_fit(fit_text: str) -> dict:
     """Parse an EFT format fit into structured data."""
-    lines = [l.strip() for l in fit_text.strip().split("\n") if l.strip()]
+    lines = [l.strip() for l in fit_text.strip().split("\n")]
 
     ship_name = "Unknown"
     fit_name = "Unknown"

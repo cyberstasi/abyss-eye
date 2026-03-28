@@ -1,4 +1,3 @@
-from collections import defaultdict
 from tools.http_client import get, post, batch_gather
 
 ESI_BASE = "https://esi.evetech.net/latest"
